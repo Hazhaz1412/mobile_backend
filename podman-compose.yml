@@ -13,6 +13,8 @@ services:
       - maven_cache:/root/.m2
     depends_on:
       - db
+    networks:
+      - mobile-network
 
   db:
     image: docker.io/library/postgres:13
@@ -24,7 +26,35 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - mobile-network
 
+  scylla:
+    image: docker.io/scylladb/scylla:latest
+    ports:
+      - "9042:9042"
+    volumes:
+      - scylla_data:/var/lib/scylla
+    networks:
+      - mobile-network
+
+  chat-video:
+    build:
+      context: ./go-service
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+    environment:
+      SCYLLA_HOST: scylla
+      SCYLLA_PORT: 9042
+      GRPC_PORT: 50051
+    volumes:
+      - ./go-service:/go/src/app
+    depends_on:
+      - scylla
+    networks:
+      - mobile-network
+      
   pgadmin:
     image: docker.io/dpage/pgadmin4:latest
     environment:
@@ -36,8 +66,15 @@ services:
       - db
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-
+    networks:
+      - mobile-network
+ 
 volumes:
   pgdata: {}
   pgadmin_data: {}
+  scylla_data: {}
   maven_cache: {}
+
+networks:
+  mobile-network:
+    driver: bridge

@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package video;
+
+option go_package = "github.com/react/mobile-chat-video/api/video";
+
+service VideoService {
+  rpc InitiateCall(CallRequest) returns (CallResponse);
+  rpc EndCall(EndCallRequest) returns (CallResponse);
+  rpc StreamICECandidates(stream ICECandidate) returns (stream ICECandidate);
+  rpc GetActiveStreams(GetStreamsRequest) returns (GetStreamsResponse);
+}
+
+message CallRequest {
+  string caller_id = 1;
+  string callee_id = 2;
+  string call_type = 3; // "audio" or "video"
+}
+
+message CallResponse {
+  bool success = 1;
+  string call_id = 2;
+  string error = 3;
+}
+
+message EndCallRequest {
+  string call_id = 1;
+  int64 duration = 2;
+}
+
+message ICECandidate {
+  string call_id = 1;
+  string candidate = 2;
+  string sdp_mid = 3;
+  int32 sdp_mline_index = 4;
+}
+
+message GetStreamsRequest {
+  string user_id = 1;
+}
+
+message GetStreamsResponse {
+  repeated Stream streams = 1;
+}
+
+message Stream {
+  string call_id = 1;
+  string initiator_id = 2;
+  string participant_id = 3;
+  string status = 4; // "active", "pending", "ended"
+  int64 start_time = 5;
+}

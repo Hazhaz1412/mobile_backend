@@ -31,3 +31,14 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Local environment files
+.env
+.env.local
+
+#GO-services
+src/go-service/bin/
+src/go-service/pkg/
+src/go-service/vendor/
+src/go-service/*.log
+src/go-service/*.out
