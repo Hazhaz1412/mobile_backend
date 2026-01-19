@@ -30,3 +30,10 @@ grpc:
   go-service:
     host: chat-video
     port: 50051
+application:
+  security:
+    jwt:
+      secret-key: ${application.security.jwt.secret-key}
+      expiration: ${application.security.jwt.expiration}
+      refresh-token:
+        expiration: ${application.security.jwt.refresh-token.expiration}

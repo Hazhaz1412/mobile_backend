@@ -2,9 +2,12 @@ package com.react.mobile.Controller;
 
 import com.react.mobile.DTO.request.RegisterRequest;
 import com.react.mobile.DTO.response.UserResponse;
+import com.react.mobile.Repository.AuthUserRepository;
 import com.react.mobile.Service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -13,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final AuthUserRepository authUserRepository;
  
     @PostMapping("/register")
     public ResponseEntity<UserResponse> register(@RequestBody RegisterRequest request) {
@@ -23,7 +27,15 @@ public class AuthController {
     public ResponseEntity<String> verifyUser(@RequestParam("token") String token) {
         return ResponseEntity.ok(authService.verifyUser(token));
     }
-
-    
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(@AuthenticationPrincipal UserDetails userDetails) {
+        var user = authUserRepository.findByUsername(userDetails.getUsername()).orElseThrow();
+        authService.logout(user);
+        return ResponseEntity.ok("Đã đăng xuất từ tất cả thiết bị!");
+    }
+    @GetMapping("/login") 
+    public ResponseEntity<String> login() {
+        return ResponseEntity.ok("Login endpoint is under construction.");
+    }
 
 }
