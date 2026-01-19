@@ -1,6 +1,8 @@
 package com.react.mobile.Controller;
 
 import com.react.mobile.DTO.request.RegisterRequest;
+import com.react.mobile.DTO.request.LoginRequest;
+import com.react.mobile.DTO.response.AuthenticationResponse;
 import com.react.mobile.DTO.response.UserResponse;
 import com.react.mobile.Repository.AuthUserRepository;
 import com.react.mobile.Service.AuthService;
@@ -32,10 +34,10 @@ public class AuthController {
         var user = authUserRepository.findByUsername(userDetails.getUsername()).orElseThrow();
         authService.logout(user);
         return ResponseEntity.ok("Đã đăng xuất từ tất cả thiết bị!");
-    }
-    @GetMapping("/login") 
-    public ResponseEntity<String> login() {
-        return ResponseEntity.ok("Login endpoint is under construction.");
+    }      
+    @PostMapping("/login") 
+    public ResponseEntity<AuthenticationResponse> login(@RequestBody LoginRequest request) {
+        return ResponseEntity.ok(authService.login(request));
     }
 
 }
