@@ -1,6 +1,6 @@
 version: "3.9"
 services:
-  mobile:
+  mobile: 
     image: docker.io/library/eclipse-temurin:21-jdk
     working_dir: /app
     command: ["./mvnw","spring-boot:run","-Dspring-boot.run.profiles=dev"]
@@ -8,9 +8,9 @@ services:
       - "8082:8082"
     environment:
       - SERVER_PORT=8082
-    volumes:
-      - .:/app
-      - maven_cache:/root/.m2
+    volumes: 
+      - .:/app:Z
+      - maven_cache:/root/.m2:Z
     depends_on:
       - db
     networks:
@@ -25,19 +25,23 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data:Z
     networks:
       - mobile-network
 
-  mongodb:
-    image: docker.io/library/mongo:7
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: admin123
+  scylladb: 
+    image: docker.io/scylladb/scylla:latest
+    container_name: scylladb 
+    command: --smp 1 --memory 1G --overprovisioned 1 --api-address 0.0.0.0 --developer-mode 1
     ports:
-      - "27017:27017"
+      - "9042:9042"
+      - "10000:10000"
     volumes:
-      - mongo_data:/data/db
+      - scylla_data:/var/lib/scylla:Z 
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     networks:
       - mobile-network
 
@@ -48,15 +52,13 @@ services:
     ports:
       - "50051:50051"
     environment:
-      MONGO_HOST: mongodb
-      MONGO_PORT: 27017
-      MONGO_USER: admin
-      MONGO_PASSWORD: admin123
+      SCYLLA_HOST: scylladb
+      SCYLLA_PORT: 9042
       GRPC_PORT: 50051
-    volumes:
-      - ./go-service:/go/src/app
+    volumes: 
+      - ./go-service:/go/src/app:Z
     depends_on:
-      - mongodb
+      - scylladb
     networks:
       - mobile-network
       
@@ -70,29 +72,14 @@ services:
     depends_on:
       - db
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - mobile-network
-
-  mongo-express:
-    image: docker.io/library/mongo-express:latest
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
-      ME_CONFIG_MONGODB_ADMINPASSWORD: admin123
-      ME_CONFIG_MONGODB_URL: mongodb://admin:admin123@mongodb:27017/
-      ME_CONFIG_BASICAUTH_USERNAME: admin
-      ME_CONFIG_BASICAUTH_PASSWORD: admin
-    ports:
-      - "8081:8081"
-    depends_on:
-      - mongodb
+      - pgadmin_data:/var/lib/pgadmin:Z
     networks:
       - mobile-network
  
 volumes:
   pgdata: {}
   pgadmin_data: {}
-  mongo_data: {}
+  scylla_data: {}
   maven_cache: {}
 
 networks:

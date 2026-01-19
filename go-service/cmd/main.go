@@ -4,15 +4,21 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 
 	"github.com/gocql/gocql"
 	"google.golang.org/grpc"
 )
 
 func initScylla() (*gocql.Session, error) {
-	cluster := gocql.NewCluster("scylla")
-	cluster.Keyspace = "chat_keyspace"
+	scyllaHost := os.Getenv("SCYLLA_HOST")
+	if scyllaHost == "" {
+		scyllaHost = "scylladb"
+	}
+
+	cluster := gocql.NewCluster(scyllaHost)
 	cluster.Port = 9042
+	cluster.Consistency = gocql.Quorum
 
 	session, err := cluster.CreateSession()
 	if err != nil {
@@ -24,7 +30,18 @@ func initScylla() (*gocql.Session, error) {
 		CREATE KEYSPACE IF NOT EXISTS chat_keyspace
 		WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
 	`).Exec(); err != nil {
-		log.Printf("Warning: could not create keyspace: %v", err)
+		session.Close()
+		return nil, fmt.Errorf("could not create keyspace: %w", err)
+	}
+
+	// Đóng session tạm thời
+	session.Close()
+
+	// Kết nối lại với keyspace
+	cluster.Keyspace = "chat_keyspace"
+	session, err = cluster.CreateSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to keyspace: %w", err)
 	}
 
 	// Create tables
