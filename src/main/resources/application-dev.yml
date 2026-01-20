@@ -8,6 +8,11 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
+  web:
+    resources:
+      add-mappings: false
+  mvc:
+    throw-exception-if-no-handler-found: true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -25,6 +30,14 @@ spring:
     from: ${SPRING_MAIL_FROM:}
 server:
   port: 8082
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: on_param
+    include-exception: false
+
+app:
+  debug: ${DEBUG:true}
 
 grpc:
   go-service:
