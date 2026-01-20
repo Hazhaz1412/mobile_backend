@@ -61,6 +61,22 @@ services:
       - scylladb
     networks:
       - mobile-network
+
+  websocket:
+    image: docker.io/library/node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm start"
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=development
+      - LOG_LEVEL=info
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080,http://localhost:8082
+    volumes:
+      - ./websocket-service:/app:Z
+    networks:
+      - mobile-network
       
   pgadmin:
     image: docker.io/dpage/pgadmin4:latest
