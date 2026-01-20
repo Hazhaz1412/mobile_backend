@@ -27,7 +27,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/api/gdpr/**").permitAll() // Cho phép test GDPR không cần auth (chỉ dùng cho dev)
+                .requestMatchers("/api/gdpr/**").permitAll() 
                 .requestMatchers("/api/user/**").authenticated()
                 .anyRequest().permitAll()
             )

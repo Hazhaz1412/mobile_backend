@@ -18,10 +18,7 @@ public class GDPRController {
 
     private final GDPRService gdprService;
 
-    /**
-     * Export tất cả dữ liệu cá nhân
-     * Xuất toàn bộ dữ liệu cá nhân của người dùng theo quy định GDPR (Right to Data Portability)
-     */
+     
     @GetMapping("/export")
     public ResponseEntity<GDPRDataResponse> exportUserData(
             @AuthenticationPrincipal AuthUser authUser) {
@@ -31,10 +28,7 @@ public class GDPRController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Xem lịch sử hoạt động
-     * Lấy lịch sử đăng nhập và hoạt động của người dùng
-     */
+     
     @GetMapping("/activity-logs")
     public ResponseEntity<GDPRDataResponse.UserActivityLog> getActivityLogs(
             @AuthenticationPrincipal AuthUser authUser,
@@ -46,8 +40,7 @@ public class GDPRController {
     }
 
     /**
-     * Xóa tài khoản
-     * Xóa tài khoản người dùng theo quy định GDPR (Right to be Forgotten).
+     
      * Type 'soft': vô hiệu hóa tài khoản. Type 'hard': xóa hoàn toàn dữ liệu.
      */
     @DeleteMapping("/delete-account")
