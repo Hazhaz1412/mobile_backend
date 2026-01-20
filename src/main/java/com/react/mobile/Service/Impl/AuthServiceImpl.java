@@ -92,8 +92,8 @@ public class AuthServiceImpl implements AuthService {
                 .orElseThrow();
 
         // 3. Sinh token
-        var jwtToken = jwtService.generateToken((org.springframework.security.core.userdetails.UserDetails) user);
-        var refreshToken = jwtService.generateRefreshToken((org.springframework.security.core.userdetails.UserDetails) user);
+        var jwtToken = jwtService.generateToken(user);
+        var refreshToken = jwtService.generateRefreshToken(user);
         
         // Lưu refresh token vào DB cho Force Logout
         saveRefreshToken(user, refreshToken);

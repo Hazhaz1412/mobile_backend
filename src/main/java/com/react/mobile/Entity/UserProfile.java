@@ -4,6 +4,9 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+import com.react.mobile.Entity.Enums.InterestType;  
+import com.react.mobile.Entity.Enums.InterestType;
+import java.util.Set; 
 import java.time.LocalDateTime;
 import java.util.UUID;  
 
@@ -36,15 +39,14 @@ public class UserProfile {
     private String address;
     @Column(name="travel_style", length = 100)
     private String travelStyle;
+    @ElementCollection(targetClass = InterestType.class, fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_interests", joinColumns = @JoinColumn(name = "user_id"))
+    @Enumerated(EnumType.STRING) 
+    @Column(name = "interest")
+    private Set<InterestType> interests;
     @Column(name = "bio", columnDefinition = "TEXT")
     private String bio;
     @Column(name = "profile_picture_url", length = 255)
     private String profilePictureUrl;
-    @CreationTimestamp
-    @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
-    @UpdateTimestamp
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
 
 }
