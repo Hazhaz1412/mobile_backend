@@ -7,6 +7,7 @@ import com.react.mobile.DTO.response.UserPreferencesResponse;
 import com.react.mobile.Entity.AuthUser;
 import com.react.mobile.Repository.AuthUserRepository;
 import com.react.mobile.Service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -33,7 +34,7 @@ public class UserController {
     @PutMapping("/profile")
     public ResponseEntity<UserProfileResponse> updateProfile(
             @AuthenticationPrincipal UserDetails userDetails,
-            @RequestBody UpdateProfileRequest request) {
+            @Valid @RequestBody UpdateProfileRequest request) {
         
         AuthUser authUser = authUserRepository.findByUsername(userDetails.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -54,7 +55,7 @@ public class UserController {
     @PutMapping("/preferences")
     public ResponseEntity<UserPreferencesResponse> updatePreferences(
             @AuthenticationPrincipal UserDetails userDetails,
-            @RequestBody UpdatePreferencesRequest request) {
+            @Valid @RequestBody UpdatePreferencesRequest request) {
         
         AuthUser authUser = authUserRepository.findByUsername(userDetails.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));

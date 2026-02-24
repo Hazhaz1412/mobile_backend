@@ -21,6 +21,9 @@ public class VerificationToken {
     @Column(nullable = false, unique = true)
     private String token;
 
+    @Column(name = "otp_code", length = 6)
+    private String otpCode;
+
     @Column(nullable = false)
     private LocalDateTime expiryDate;
     

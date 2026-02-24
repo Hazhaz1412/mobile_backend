@@ -1,6 +1,7 @@
 package com.react.mobile.Repository;
 
 import com.react.mobile.Entity.LoginHistory;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
@@ -14,6 +15,8 @@ public interface LoginHistoryRepository extends JpaRepository<LoginHistory, Long
     List<LoginHistory> findTop50ByUserIdOrderByLoginTimeDesc(Long userId);
     
     List<LoginHistory> findByUserIdOrderByLoginTimeDesc(Long userId);
+
+    List<LoginHistory> findByUserIdOrderByLoginTimeDesc(Long userId, Pageable pageable);
     
     Long countByUserId(Long userId);
     

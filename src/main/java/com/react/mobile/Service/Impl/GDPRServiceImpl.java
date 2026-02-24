@@ -10,17 +10,20 @@ import com.react.mobile.Repository.LoginHistoryRepository;
 import com.react.mobile.Repository.RefreshTokenRepository;
 import com.react.mobile.Repository.UserProfileRepository;
 import com.react.mobile.Repository.UserPreferencesRepository;
+import com.react.mobile.Repository.LocationHistoryRepository;
+import com.react.mobile.Repository.UserLocationRepository;
 import com.react.mobile.Repository.VerificationTokenRepository;
 import com.react.mobile.Repository.SocialAuthUserRepository;
 import com.react.mobile.Service.GDPRService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -30,6 +33,8 @@ public class GDPRServiceImpl implements GDPRService {
     private final UserProfileRepository userProfileRepository;
     private final UserPreferencesRepository userPreferencesRepository;
     private final LoginHistoryRepository loginHistoryRepository;
+    private final LocationHistoryRepository locationHistoryRepository;
+    private final UserLocationRepository userLocationRepository;
     private final AuthUserRepository authUserRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final VerificationTokenRepository verificationTokenRepository;
@@ -92,17 +97,11 @@ public class GDPRServiceImpl implements GDPRService {
                 log.debug("Deleted refresh tokens for user ID: {}", userId);
                 
                 // 2. Xóa verification tokens (nếu có)
-                var verificationToken = verificationTokenRepository.findAll().stream()
-                    .filter(t -> t.getUser() != null && t.getUser().getId().equals(userId))
-                    .findFirst();
-                verificationToken.ifPresent(verificationTokenRepository::delete);
+                verificationTokenRepository.deleteByUser(authUser);
                 log.debug("Deleted verification tokens for user ID: {}", userId);
                 
                 // 3. Xóa social auth users (nếu có)
-                var socialAuthUsers = socialAuthUserRepository.findAll().stream()
-                    .filter(s -> s.getAuthUser() != null && s.getAuthUser().getId().equals(userId))
-                    .toList();
-                socialAuthUserRepository.deleteAll(socialAuthUsers);
+                socialAuthUserRepository.deleteByAuthUser(authUser);
                 log.debug("Deleted social auth for user ID: {}", userId);
                 
                 // 4. Xóa user preferences
@@ -115,11 +114,19 @@ public class GDPRServiceImpl implements GDPRService {
                     .ifPresent(userProfileRepository::delete);
                 log.debug("Deleted profile for user ID: {}", userId);
                 
-                // 6. Xóa login history
+                // 6. Xóa user location hiện tại
+                userLocationRepository.deleteByUserId(userId);
+                log.debug("Deleted current location for user ID: {}", userId);
+
+                // 7. Xóa location history
+                locationHistoryRepository.deleteByUserId(userId);
+                log.debug("Deleted location history for user ID: {}", userId);
+
+                // 8. Xóa login history
                 loginHistoryRepository.deleteByUserId(userId);
                 log.debug("Deleted login history for user ID: {}", userId);
                 
-                // 7. Cuối cùng xóa auth user
+                // 9. Cuối cùng xóa auth user
                 authUserRepository.delete(authUser);
                 log.info("Hard deleted user ID: {}", userId);
                 
@@ -137,9 +144,11 @@ public class GDPRServiceImpl implements GDPRService {
     public GDPRDataResponse.UserActivityLog getActivityLogs(AuthUser authUser, Integer limit) {
         log.info("Getting activity logs for user ID: {} with limit: {}", authUser.getId(), limit);
         
-        List<LoginHistory> loginLogs = (limit != null && limit > 0) 
-            ? loginHistoryRepository.findTop50ByUserIdOrderByLoginTimeDesc(authUser.getId())
-            : loginHistoryRepository.findByUserIdOrderByLoginTimeDesc(authUser.getId());
+        int safeLimit = (limit == null || limit <= 0) ? 50 : Math.min(limit, 200);
+        List<LoginHistory> loginLogs = loginHistoryRepository.findByUserIdOrderByLoginTimeDesc(
+                authUser.getId(),
+                PageRequest.of(0, safeLimit)
+        );
         
         Long totalLogins = loginHistoryRepository.countByUserId(authUser.getId());
         LocalDateTime lastLogin = loginLogs.isEmpty() ? null : loginLogs.get(0).getLoginTime();
@@ -189,12 +198,12 @@ public class GDPRServiceImpl implements GDPRService {
         
         return GDPRDataResponse.PreferencesInfo.builder()
                 .language(preferences.getLanguage())
-                .theme(preferences.getDarkMode() ? "dark" : "light")
-                .emailNotifications(preferences.getEmailNotifications())
-                .pushNotifications(preferences.getPushNotifications())
-                .smsNotifications(preferences.getSmsNotifications())
+                .theme(Boolean.TRUE.equals(preferences.getDarkMode()) ? "dark" : "light")
+                .emailNotifications(Objects.requireNonNullElse(preferences.getEmailNotifications(), false))
+                .pushNotifications(Objects.requireNonNullElse(preferences.getPushNotifications(), false))
+                .smsNotifications(Objects.requireNonNullElse(preferences.getSmsNotifications(), false))
                 .marketingEmails(false) // Không có field này trong entity
-                .privacyLevel(preferences.getProfileVisibility() ? "public" : "private")
+                .privacyLevel(Boolean.TRUE.equals(preferences.getProfileVisibility()) ? "public" : "private")
                 .twoFactorEnabled(false) // Không có field này trong entity
                 .updatedAt(preferences.getUpdatedAt())
                 .build();
@@ -210,6 +219,6 @@ public class GDPRServiceImpl implements GDPRService {
                         .location(lh.getLocation())
                         .success(lh.getSuccess())
                         .build())
-                .collect(Collectors.toList());
+                .toList();
     }
 }

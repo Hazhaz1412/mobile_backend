@@ -11,8 +11,12 @@ import java.util.List;
 @Repository
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
     Optional<RefreshToken> findByToken(String token);
+
+    Optional<RefreshToken> findByTokenAndRevokedFalse(String token);
     
     List<RefreshToken> findByUser(AuthUser user);
+
+    List<RefreshToken> findByUserAndRevokedFalse(AuthUser user);
     
     void deleteByUser(AuthUser user);
 }

@@ -43,6 +43,7 @@ grpc:
   go-service:
     host: chat-video
     port: 50051
+
 application:
   security:
     jwt:
@@ -50,3 +51,8 @@ application:
       expiration: ${application.security.jwt.expiration}
       refresh-token:
         expiration: ${application.security.jwt.refresh-token.expiration}
+
+# Google OAuth Configuration
+google:
+  oauth:
+    client-id: ${GOOGLE_OAUTH_CLIENT_ID:}

@@ -14,6 +14,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Locale;
+
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
@@ -39,6 +41,9 @@ public class UserServiceImpl implements UserService {
         if (request.getDateOfBirth() != null) {
             profile.setDateOfBirth(request.getDateOfBirth());
         }
+        if (request.getAge() != null) {
+            profile.setAge(request.getAge());
+        }
         if (request.getGender() != null) {
             profile.setGender(request.getGender());
         }
@@ -49,7 +54,7 @@ public class UserServiceImpl implements UserService {
             profile.setAddress(request.getAddress());
         }
         if (request.getTravelStyle() != null) {
-            profile.setTravelStyle(request.getTravelStyle());
+            profile.setTravelStyle(normalizeTravelStyle(request.getTravelStyle()));
         }
         if (request.getInterests() != null) {
             profile.setInterests(request.getInterests());
@@ -130,6 +135,7 @@ public class UserServiceImpl implements UserService {
                 .firstName(profile.getFirstName())
                 .lastName(profile.getLastName())
                 .dateOfBirth(profile.getDateOfBirth())
+                .age(profile.getAge())
                 .gender(profile.getGender())
                 .phoneNumber(profile.getPhoneNumber())
                 .address(profile.getAddress())
@@ -151,6 +157,14 @@ public class UserServiceImpl implements UserService {
                 .timezone(preferences.getTimezone())
                 .darkMode(preferences.getDarkMode()) 
                 .build();
+    }
+
+    private String normalizeTravelStyle(String travelStyle) {
+        String normalized = travelStyle.trim().toUpperCase(Locale.ROOT);
+        if (!normalized.equals("SOLO") && !normalized.equals("FAMILY") && !normalized.equals("GROUP")) {
+            throw new IllegalArgumentException("Travel style chỉ nhận SOLO, FAMILY hoặc GROUP");
+        }
+        return normalized;
     }
 }
  

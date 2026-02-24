@@ -11,7 +11,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
-import java.util.UUID;  
+import java.util.Set;  
+import java.util.UUID;
 
 @Entity
 @Table(name = "auth_user")
@@ -24,40 +25,50 @@ public class AuthUser implements UserDetails {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
- 
+
     @Column(name = "uuid", nullable = false, unique = true, updatable = false)
-    @Builder.Default  
-    private UUID uuid = UUID.randomUUID(); 
+    @Builder.Default
+    private UUID uuid = UUID.randomUUID();
 
     @Column(name = "username", nullable = false, unique = true, length = 75)
     private String username;
- 
-    @Column(name = "password", nullable = false, length = 255) 
+
+    @Column(name = "password", nullable = false, length = 255)
     private String password;
 
     @Column(name = "is_superuser")
     @Builder.Default
-    private Boolean isSuperuser = false;  
+    private Boolean isSuperuser = false;
 
     @Column(name = "is_staff")
     @Builder.Default
-    private Boolean isStaff = false;  
+    private Boolean isStaff = false;
 
     @Column(name = "is_active")
     @Builder.Default
-    private Boolean isActive = true;  
+    private Boolean isActive = true;
 
     @Column(name = "email", nullable = false, unique = true, length = 100)
     private String email;
  
+    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ToString.Exclude  
+    private UserLocation location;
+ 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_interests", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "interest")
+    private Set<String> interests;
+
     @CreationTimestamp
     @Column(name = "date_joined", updatable = false)
-    private LocalDateTime dateJoined;  
+    private LocalDateTime dateJoined;
 
     @UpdateTimestamp
     @Column(name = "last_login")
-    private LocalDateTime lastLogin;  
+    private LocalDateTime lastLogin;
 
+    // --- CÁC HÀM CỦA USER DETAILS (GIỮ NGUYÊN) ---
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority("ROLE_USER"));
