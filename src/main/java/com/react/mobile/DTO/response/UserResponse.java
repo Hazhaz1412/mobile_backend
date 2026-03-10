@@ -11,5 +11,7 @@ public class UserResponse {
     private String username;
     private String email;
     private Boolean isActive;
+    private Boolean isSuperuser;
+    private Boolean isStaff;
     private LocalDateTime dateJoined;
 }

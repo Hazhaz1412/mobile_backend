@@ -14,6 +14,7 @@ import com.react.mobile.Repository.LocationHistoryRepository;
 import com.react.mobile.Repository.UserLocationRepository;
 import com.react.mobile.Repository.UserProfileRepository;
 import com.react.mobile.Service.LocationService;
+import com.react.mobile.Service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,7 @@ public class LocationServiceImpl implements LocationService {
     private final UserLocationRepository userLocationRepository;
     private final LocationHistoryRepository locationHistoryRepository;
     private final UserProfileRepository userProfileRepository;
+    private final NotificationService notificationService;
 
     private static final List<CatalogPlace> CATALOG = List.of(
             new CatalogPlace("poi-dragon-bridge", "Dragon Bridge", "POI", "CULTURE",
@@ -239,6 +241,8 @@ public class LocationServiceImpl implements LocationService {
                 .locationName(trimToNull(request.getLocationName()))
                 .build();
         locationHistoryRepository.save(history);
+
+        notificationService.notifyNearbyAlertsForLocation(authUser, request.getLatitude(), request.getLongitude());
 
         return mapLocation(saved);
     }

@@ -10,5 +10,8 @@ import org.mapstruct.Mapping;
 public interface UserMapper {
      
     AuthUser toEntity(RegisterRequest request); 
+
+    @Mapping(target = "isSuperuser", source = "isSuperuser")
+    @Mapping(target = "isStaff", source = "isStaff")
     UserResponse toResponse(AuthUser user);
 }
