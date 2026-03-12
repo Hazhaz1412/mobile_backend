@@ -19,6 +19,12 @@ public interface LoginHistoryRepository extends JpaRepository<LoginHistory, Long
     List<LoginHistory> findByUserIdOrderByLoginTimeDesc(Long userId, Pageable pageable);
     
     Long countByUserId(Long userId);
+
+    Long countByUserIdAndSuccessTrueAndLoginTimeAfter(Long userId, LocalDateTime startDate);
+
+    Long countBySuccessTrueAndLoginTimeAfter(LocalDateTime startDate);
+
+    List<LoginHistory> findByLoginTimeAfterOrderByLoginTimeAsc(LocalDateTime startDate);
     
     @Query("SELECT lh FROM LoginHistory lh WHERE lh.userId = :userId AND lh.success = true ORDER BY lh.loginTime DESC")
     List<LoginHistory> findSuccessfulLoginsByUserId(Long userId);

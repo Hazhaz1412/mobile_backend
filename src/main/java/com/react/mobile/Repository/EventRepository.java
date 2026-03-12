@@ -1,8 +1,10 @@
 package com.react.mobile.Repository;
 
 import com.react.mobile.Entity.Event;
+import com.react.mobile.Entity.Enums.EventModerationStatus;
 import com.react.mobile.Entity.Enums.EventStatus;
 import com.react.mobile.Entity.Enums.EventType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -26,7 +28,15 @@ public interface EventRepository extends JpaRepository<Event, Long> {
 
     List<Event> findByOrganizerIdOrderByCreatedAtDesc(Long organizerId);
 
+    List<Event> findByCreatedAtAfterOrderByCreatedAtAsc(LocalDateTime from);
+
+    long countByOrganizerIdAndCreatedAtAfter(Long organizerId, LocalDateTime from);
+
     Optional<Event> findFirstByTitleIgnoreCaseOrderByCreatedAtDesc(String title);
+
+    long countByModerationStatus(EventModerationStatus moderationStatus);
+
+    long countByModerationStatusIsNull();
 
     @Query("SELECT e FROM Event e WHERE " +
             "(:status IS NULL OR e.status = :status) AND " +
@@ -39,6 +49,15 @@ public interface EventRepository extends JpaRepository<Event, Long> {
             @Param("eventType") EventType eventType,
             @Param("isFree") Boolean isFree,
             @Param("search") String search
+    );
+
+    @Query("SELECT e.locationName, COUNT(e) FROM Event e WHERE " +
+            "e.locationName IS NOT NULL AND e.locationName <> '' AND " +
+            "(:moderationStatus IS NULL OR e.moderationStatus = :moderationStatus) " +
+            "GROUP BY e.locationName ORDER BY COUNT(e) DESC")
+    List<Object[]> findTopLocationNames(
+            @Param("moderationStatus") EventModerationStatus moderationStatus,
+            Pageable pageable
     );
 
     @Modifying

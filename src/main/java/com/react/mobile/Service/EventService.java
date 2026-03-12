@@ -26,9 +26,24 @@ public interface EventService {
             int size
     );
 
+    EventListResponse listEventsForAdmin(
+            AuthUser user,
+            String status,
+            String eventType,
+            String moderationStatus,
+            Boolean isFree,
+            String search,
+            int page,
+            int size
+    );
+
     EventResponse updateEvent(AuthUser user, Long eventId, CreateEventRequest request);
 
     void deleteEvent(AuthUser user, Long eventId);
+
+    EventResponse approveEvent(AuthUser user, Long eventId);
+
+    EventResponse rejectEvent(AuthUser user, Long eventId, String reason);
 
     EventResponse joinEvent(AuthUser user, Long eventId);
 

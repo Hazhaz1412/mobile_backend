@@ -15,6 +15,8 @@ public class EventResponse {
     private String description;
     private String eventType;
     private String status;
+    private String moderationStatus;
+    private String moderationReason;
     private Boolean isFree;
     private Double price;
     private String currency;

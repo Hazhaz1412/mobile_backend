@@ -6,6 +6,7 @@ import com.react.mobile.DTO.response.EventResponse;
 import com.react.mobile.Entity.AuthUser;
 import com.react.mobile.Entity.Event;
 import com.react.mobile.Entity.EventBookmark;
+import com.react.mobile.Entity.Enums.EventModerationStatus;
 import com.react.mobile.Entity.Enums.EventStatus;
 import com.react.mobile.Entity.Enums.EventType;
 import com.react.mobile.Repository.EventBookmarkRepository;
@@ -13,20 +14,21 @@ import com.react.mobile.Repository.EventRepository;
 import com.react.mobile.Service.EventService;
 import com.react.mobile.Service.NotificationService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class EventServiceImpl implements EventService {
 
     private final EventRepository eventRepository;
@@ -41,7 +43,7 @@ public class EventServiceImpl implements EventService {
         Event event = Event.builder()
                 .title(req.getTitle())
                 .description(req.getDescription())
-                .eventType(EventType.valueOf(req.getEventType()))
+                .eventType(parseEventType(req.getEventType()))
                 .isFree(req.getIsFree() != null ? req.getIsFree() : true)
                 .price(req.getPrice())
                 .currency(req.getCurrency() != null ? req.getCurrency() : "VND")
@@ -54,25 +56,26 @@ public class EventServiceImpl implements EventService {
                 .imageUrl(req.getImageUrl())
                 .organizer(user)
                 .status(EventStatus.INCOMING)
+                .moderationStatus(EventModerationStatus.PENDING)
+                .moderationReason(null)
                 .currentAttendees(0)
                 .build();
 
-        // Auto-set status based on dates
-        LocalDateTime now = LocalDateTime.now();
-        if (event.getEndDate().isBefore(now)) {
-            event.setStatus(EventStatus.COMPLETED);
-        } else if (event.getStartDate().isBefore(now) || event.getStartDate().isEqual(now)) {
-            event.setStatus(EventStatus.ONGOING);
-        }
-
+        applyTemporalStatus(event);
         event = eventRepository.save(event);
         return toResponse(event, user.getId());
     }
 
     @Override
+    @Transactional(readOnly = true)
     public EventResponse getEvent(AuthUser user, Long eventId) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new RuntimeException("Event not found"));
+
+        if (!isVisibleToUser(event, user)) {
+            throw new AccessDeniedException("You do not have permission to view this event");
+        }
+
         return toResponse(event, user.getId());
     }
 
@@ -90,24 +93,18 @@ public class EventServiceImpl implements EventService {
             int page,
             int size
     ) {
-        // Refresh statuses before listing
         refreshEventStatuses();
 
-        EventStatus statusEnum = null;
-        if (status != null && !status.isEmpty() && !"ALL".equalsIgnoreCase(status)) {
-            statusEnum = EventStatus.valueOf(status);
-        }
-
-        EventType typeEnum = null;
-        if (eventType != null && !eventType.isEmpty() && !"ALL".equalsIgnoreCase(eventType)) {
-            typeEnum = EventType.valueOf(eventType);
-        }
-
+        EventStatus statusEnum = parseEventStatus(status);
+        EventType typeEnum = parseEventTypeFilter(eventType);
         String searchParam = (search != null && !search.isBlank()) ? search.trim() : "";
 
         List<Event> events = eventRepository.filterEvents(statusEnum, typeEnum, isFree, searchParam);
 
-        // Distance filtering (if lat/lng provided)
+        events = events.stream()
+                .filter(event -> isVisibleToUser(event, user))
+                .collect(Collectors.toList());
+
         if (latitude != null && longitude != null && maxDistanceKm != null) {
             events = events.stream()
                     .filter(e -> e.getLatitude() != null && e.getLongitude() != null)
@@ -115,31 +112,35 @@ public class EventServiceImpl implements EventService {
                     .collect(Collectors.toList());
         }
 
-        List<EventResponse> responses = events.stream()
-                .map(e -> toResponse(e, user.getId()))
+        return toPagedListResponse(events, user, status, eventType, search, page, size);
+    }
+
+    @Override
+    @Transactional
+    public EventListResponse listEventsForAdmin(
+            AuthUser user,
+            String status,
+            String eventType,
+            String moderationStatus,
+            Boolean isFree,
+            String search,
+            int page,
+            int size
+    ) {
+        ensureAdmin(user);
+        refreshEventStatuses();
+
+        EventStatus statusEnum = parseEventStatus(status);
+        EventType typeEnum = parseEventTypeFilter(eventType);
+        EventModerationStatus moderationEnum = parseModerationStatusFilter(moderationStatus);
+        String searchParam = (search != null && !search.isBlank()) ? search.trim() : "";
+
+        List<Event> events = eventRepository.filterEvents(statusEnum, typeEnum, isFree, searchParam)
+                .stream()
+                .filter(event -> moderationEnum == null || moderationEnum.equals(resolveModerationStatus(event)))
                 .collect(Collectors.toList());
 
-        int safePage = Math.max(0, page);
-        int safeSize = Math.min(Math.max(1, size), 50);
-        int total = responses.size();
-        int fromIdx = safePage * safeSize;
-        int toIdx = Math.min(fromIdx + safeSize, total);
-        List<EventResponse> pagedResponses = fromIdx < total
-                ? responses.subList(fromIdx, toIdx)
-                : List.of();
-        int totalPages = (int) Math.ceil((double) total / safeSize);
-
-        return EventListResponse.builder()
-                .events(pagedResponses)
-                .total((long) total)
-                .filterStatus(status)
-                .filterType(eventType)
-                .searchQuery(search)
-                .page(safePage)
-                .size(safeSize)
-                .totalPages(totalPages)
-                .hasNext(toIdx < total)
-                .build();
+        return toPagedListResponse(events, user, status, eventType, search, page, size);
     }
 
     @Override
@@ -154,7 +155,7 @@ public class EventServiceImpl implements EventService {
 
         if (req.getTitle() != null) event.setTitle(req.getTitle());
         if (req.getDescription() != null) event.setDescription(req.getDescription());
-        if (req.getEventType() != null) event.setEventType(EventType.valueOf(req.getEventType()));
+        if (req.getEventType() != null) event.setEventType(parseEventType(req.getEventType()));
         if (req.getIsFree() != null) event.setIsFree(req.getIsFree());
         if (req.getPrice() != null) event.setPrice(req.getPrice());
         if (req.getCurrency() != null) event.setCurrency(req.getCurrency());
@@ -165,6 +166,10 @@ public class EventServiceImpl implements EventService {
         if (req.getLocationName() != null) event.setLocationName(req.getLocationName());
         if (req.getMaxAttendees() != null) event.setMaxAttendees(req.getMaxAttendees());
         if (req.getImageUrl() != null) event.setImageUrl(req.getImageUrl());
+
+        applyTemporalStatus(event);
+        event.setModerationStatus(EventModerationStatus.PENDING);
+        event.setModerationReason(null);
 
         event = eventRepository.save(event);
         notificationService.notifyEventUpdated(event, user);
@@ -186,9 +191,47 @@ public class EventServiceImpl implements EventService {
 
     @Override
     @Transactional
+    public EventResponse approveEvent(AuthUser user, Long eventId) {
+        ensureAdmin(user);
+
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new RuntimeException("Event not found"));
+
+        event.setModerationStatus(EventModerationStatus.APPROVED);
+        event.setModerationReason(null);
+        event = eventRepository.save(event);
+
+        return toResponse(event, user.getId());
+    }
+
+    @Override
+    @Transactional
+    public EventResponse rejectEvent(AuthUser user, Long eventId, String reason) {
+        ensureAdmin(user);
+
+        if (reason == null || reason.trim().isEmpty()) {
+            throw new IllegalArgumentException("Reject reason is required");
+        }
+
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new RuntimeException("Event not found"));
+
+        event.setModerationStatus(EventModerationStatus.REJECTED);
+        event.setModerationReason(reason.trim());
+        event = eventRepository.save(event);
+
+        return toResponse(event, user.getId());
+    }
+
+    @Override
+    @Transactional
     public EventResponse joinEvent(AuthUser user, Long eventId) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new RuntimeException("Event not found"));
+
+        if (!isVisibleToUser(event, user)) {
+            throw new AccessDeniedException("You do not have permission to join this event");
+        }
 
         if (event.getStatus() == EventStatus.COMPLETED) {
             throw new RuntimeException("Cannot join a completed event");
@@ -209,6 +252,10 @@ public class EventServiceImpl implements EventService {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new RuntimeException("Event not found"));
 
+        if (!isVisibleToUser(event, user)) {
+            throw new AccessDeniedException("You do not have permission to leave this event");
+        }
+
         if (event.getCurrentAttendees() > 0) {
             event.setCurrentAttendees(event.getCurrentAttendees() - 1);
         }
@@ -218,10 +265,13 @@ public class EventServiceImpl implements EventService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<EventResponse> getBookmarks(AuthUser user) {
         List<EventBookmark> bookmarks = eventBookmarkRepository.findByUserIdOrderByCreatedAtDesc(user.getId());
         return bookmarks.stream()
-                .map(bm -> toResponse(bm.getEvent(), user.getId()))
+                .map(EventBookmark::getEvent)
+                .filter(event -> isVisibleToUser(event, user))
+                .map(event -> toResponse(event, user.getId()))
                 .collect(Collectors.toList());
     }
 
@@ -232,19 +282,25 @@ public class EventServiceImpl implements EventService {
         if (exists) {
             eventBookmarkRepository.deleteByUserIdAndEventId(user.getId(), eventId);
             return false;
-        } else {
-            Event event = eventRepository.findById(eventId)
-                    .orElseThrow(() -> new RuntimeException("Event not found"));
-            EventBookmark bookmark = EventBookmark.builder()
-                    .user(user)
-                    .event(event)
-                    .build();
-            eventBookmarkRepository.save(bookmark);
-            return true;
         }
+
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new RuntimeException("Event not found"));
+
+        if (!isVisibleToUser(event, user)) {
+            throw new AccessDeniedException("You do not have permission to bookmark this event");
+        }
+
+        EventBookmark bookmark = EventBookmark.builder()
+                .user(user)
+                .event(event)
+                .build();
+        eventBookmarkRepository.save(bookmark);
+        return true;
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<EventResponse> getMyEvents(AuthUser user) {
         return eventRepository.findByOrganizerIdOrderByCreatedAtDesc(user.getId())
                 .stream()
@@ -257,8 +313,8 @@ public class EventServiceImpl implements EventService {
     @Transactional
     public void refreshEventStatuses() {
         LocalDateTime now = LocalDateTime.now();
-        List<Event> changedEvents = new java.util.ArrayList<>();
-        List<StatusTransition> transitions = new java.util.ArrayList<>();
+        List<Event> changedEvents = new ArrayList<>();
+        List<StatusTransition> transitions = new ArrayList<>();
 
         List<Event> incomingDue = eventRepository.findByStatusAndStartDateLessThanEqual(EventStatus.INCOMING, now);
         for (Event event : incomingDue) {
@@ -289,10 +345,45 @@ public class EventServiceImpl implements EventService {
         }
     }
 
-    // ────────── HELPERS ──────────
+    private EventListResponse toPagedListResponse(
+            List<Event> events,
+            AuthUser user,
+            String status,
+            String eventType,
+            String search,
+            int page,
+            int size
+    ) {
+        List<EventResponse> responses = events.stream()
+                .map(e -> toResponse(e, user.getId()))
+                .collect(Collectors.toList());
+
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(1, size), 50);
+        int total = responses.size();
+        int fromIdx = safePage * safeSize;
+        int toIdx = Math.min(fromIdx + safeSize, total);
+        List<EventResponse> pagedResponses = fromIdx < total
+                ? responses.subList(fromIdx, toIdx)
+                : List.of();
+        int totalPages = (int) Math.ceil((double) total / safeSize);
+
+        return EventListResponse.builder()
+                .events(pagedResponses)
+                .total((long) total)
+                .filterStatus(status)
+                .filterType(eventType)
+                .searchQuery(search)
+                .page(safePage)
+                .size(safeSize)
+                .totalPages(totalPages)
+                .hasNext(toIdx < total)
+                .build();
+    }
 
     private EventResponse toResponse(Event event, Long currentUserId) {
-        boolean bookmarked = eventBookmarkRepository.existsByUserIdAndEventId(currentUserId, event.getId());
+        boolean bookmarked = currentUserId != null
+                && eventBookmarkRepository.existsByUserIdAndEventId(currentUserId, event.getId());
 
         Long countdownSeconds = null;
         if (event.getStatus() == EventStatus.INCOMING) {
@@ -300,12 +391,16 @@ public class EventServiceImpl implements EventService {
             if (countdownSeconds < 0) countdownSeconds = 0L;
         }
 
+        EventModerationStatus moderationStatus = resolveModerationStatus(event);
+
         return EventResponse.builder()
                 .id(event.getId())
                 .title(event.getTitle())
                 .description(event.getDescription())
                 .eventType(event.getEventType().name())
                 .status(event.getStatus().name())
+                .moderationStatus(moderationStatus.name())
+                .moderationReason(event.getModerationReason())
                 .isFree(event.getIsFree())
                 .price(event.getPrice())
                 .currency(event.getCurrency())
@@ -325,15 +420,100 @@ public class EventServiceImpl implements EventService {
                 .build();
     }
 
+    private void applyTemporalStatus(Event event) {
+        LocalDateTime now = LocalDateTime.now();
+        if (event.getEndDate() != null && event.getEndDate().isBefore(now)) {
+            event.setStatus(EventStatus.COMPLETED);
+        } else if (event.getStartDate() != null &&
+                (event.getStartDate().isBefore(now) || event.getStartDate().isEqual(now))) {
+            event.setStatus(EventStatus.ONGOING);
+        } else {
+            event.setStatus(EventStatus.INCOMING);
+        }
+    }
+
+    private boolean isVisibleToUser(Event event, AuthUser user) {
+        if (isPrivileged(user)) {
+            return true;
+        }
+        if (event.getOrganizer() != null
+                && event.getOrganizer().getId() != null
+                && user != null
+                && user.getId() != null
+                && event.getOrganizer().getId().equals(user.getId())) {
+            return true;
+        }
+        return isApprovedForPublic(event);
+    }
+
+    private boolean isApprovedForPublic(Event event) {
+        return resolveModerationStatus(event) == EventModerationStatus.APPROVED;
+    }
+
+    private EventModerationStatus resolveModerationStatus(Event event) {
+        return event.getModerationStatus() == null ? EventModerationStatus.APPROVED : event.getModerationStatus();
+    }
+
+    private EventStatus parseEventStatus(String value) {
+        if (value == null || value.isBlank() || "ALL".equalsIgnoreCase(value)) {
+            return null;
+        }
+        try {
+            return EventStatus.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("Unsupported event status: " + value);
+        }
+    }
+
+    private EventType parseEventTypeFilter(String value) {
+        if (value == null || value.isBlank() || "ALL".equalsIgnoreCase(value)) {
+            return null;
+        }
+        return parseEventType(value);
+    }
+
+    private EventType parseEventType(String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Event type is required");
+        }
+        try {
+            return EventType.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("Unsupported event type: " + value);
+        }
+    }
+
+    private EventModerationStatus parseModerationStatusFilter(String value) {
+        if (value == null || value.isBlank() || "ALL".equalsIgnoreCase(value)) {
+            return null;
+        }
+        try {
+            return EventModerationStatus.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("Unsupported moderation status: " + value);
+        }
+    }
+
+    private void ensureAdmin(AuthUser user) {
+        if (!isPrivileged(user)) {
+            throw new AccessDeniedException("Admin access required");
+        }
+    }
+
+    private boolean isPrivileged(AuthUser user) {
+        return user != null
+                && (Boolean.TRUE.equals(user.getIsSuperuser()) || Boolean.TRUE.equals(user.getIsStaff()));
+    }
+
     private double haversineKm(double lat1, double lon1, double lat2, double lon2) {
-        double R = 6371.0;
+        double r = 6371.0;
         double dLat = Math.toRadians(lat2 - lat1);
         double dLon = Math.toRadians(lon2 - lon1);
         double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
                 + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
                 * Math.sin(dLon / 2) * Math.sin(dLon / 2);
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+        return r * c;
     }
 
     private record StatusTransition(Event event, EventStatus previousStatus) {

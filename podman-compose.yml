@@ -1,7 +1,11 @@
 version: "3.9"
 services:
   mobile: 
-    image: docker.io/library/eclipse-temurin:21-jdk
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    image: mobile-backend-dev
     working_dir: /app
     command: ["./mvnw","spring-boot:run","-Dspring-boot.run.profiles=dev"]
     ports:

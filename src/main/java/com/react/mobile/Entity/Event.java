@@ -1,6 +1,7 @@
 package com.react.mobile.Entity;
 
 import com.react.mobile.Entity.Enums.EventStatus;
+import com.react.mobile.Entity.Enums.EventModerationStatus;
 import com.react.mobile.Entity.Enums.EventType;
 import jakarta.persistence.*;
 import lombok.*;
@@ -35,6 +36,14 @@ public class Event {
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
     private EventStatus status = EventStatus.INCOMING;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "moderation_status", length = 20)
+    @Builder.Default
+    private EventModerationStatus moderationStatus = EventModerationStatus.PENDING;
+
+    @Column(name = "moderation_reason", length = 500)
+    private String moderationReason;
 
     @Column(name = "is_free", nullable = false)
     @Builder.Default
