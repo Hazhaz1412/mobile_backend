@@ -56,10 +56,13 @@ public class SecurityConfig {
                 .requestMatchers("/api/location/**").authenticated()
                 .requestMatchers("/api/discovery/**").authenticated()
                 .requestMatchers("/api/events/**").authenticated()
+                .requestMatchers("/api/chat/**").authenticated()
                 .requestMatchers("/api/reviews/**").authenticated()
                 .requestMatchers("/api/notifications/**").authenticated()
                 .requestMatchers("/api/admin/**").authenticated()
                 .requestMatchers("/api/travel-plans/**").authenticated()
+                .requestMatchers("/api/social/**").authenticated()
+                .requestMatchers("/api/dm/**").authenticated()
                 .anyRequest().permitAll()
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -71,19 +74,10 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of(
-                "http://localhost:*",
-                "https://localhost:*",
-                "http://127.0.0.1:*",
-                "https://127.0.0.1:*",
-                "http://192.168.1.51:*",
-                "https://192.168.1.51:*",
-                "exp://*"
-        ));
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("*"));
-        configuration.setExposedHeaders(List.of("Authorization", "Content-Type"));
-        configuration.setAllowCredentials(true);
+        configuration.addAllowedOriginPattern("*"); // Cho phép tất cả origin
+        configuration.addAllowedHeader("*"); // Cho phép tất cả header
+        configuration.addAllowedMethod("*"); // Cho phép tất cả method
+        configuration.setAllowCredentials(true); // Nếu không cần cookie, có thể set false
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

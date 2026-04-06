@@ -122,6 +122,14 @@ public class EventController {
         return ResponseEntity.ok(eventService.getMyEvents(user));
     }
 
+    @GetMapping("/joined")
+    public ResponseEntity<List<Long>> getJoinedEventIds(
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        AuthUser user = resolveUser(userDetails);
+        return ResponseEntity.ok(eventService.getJoinedEventIds(user));
+    }
+
     private AuthUser resolveUser(UserDetails userDetails) {
         return authUserRepository.findByUsername(userDetails.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));

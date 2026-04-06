@@ -20,7 +20,7 @@ public class SocialAuthUser {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     @Column(columnDefinition = "uuid") 
-    private String id; // Đổi thành String (hoặc java.util.UUID) để chứa UUID
+    private java.util.UUID id;
 
     @Column(name = "provider", nullable = false, length = 55)
     private String provider;

@@ -6,13 +6,19 @@ import com.react.mobile.DTO.response.EventResponse;
 import com.react.mobile.Entity.AuthUser;
 import com.react.mobile.Entity.Event;
 import com.react.mobile.Entity.EventBookmark;
+import com.react.mobile.Entity.Enums.EventParticipantRole;
 import com.react.mobile.Entity.Enums.EventModerationStatus;
 import com.react.mobile.Entity.Enums.EventStatus;
 import com.react.mobile.Entity.Enums.EventType;
+import com.react.mobile.Entity.EventParticipant;
+import com.react.mobile.Repository.EventChatMessageKeyRepository;
+import com.react.mobile.Repository.EventChatMessageRepository;
 import com.react.mobile.Repository.EventBookmarkRepository;
+import com.react.mobile.Repository.EventParticipantRepository;
 import com.react.mobile.Repository.EventRepository;
 import com.react.mobile.Service.EventService;
 import com.react.mobile.Service.NotificationService;
+import com.react.mobile.Service.SocialService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.access.AccessDeniedException;
@@ -25,6 +31,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -33,7 +40,11 @@ public class EventServiceImpl implements EventService {
 
     private final EventRepository eventRepository;
     private final EventBookmarkRepository eventBookmarkRepository;
+    private final EventParticipantRepository eventParticipantRepository;
+    private final EventChatMessageRepository eventChatMessageRepository;
+    private final EventChatMessageKeyRepository eventChatMessageKeyRepository;
     private final NotificationService notificationService;
+    private final SocialService socialService;
 
     private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
@@ -63,6 +74,18 @@ public class EventServiceImpl implements EventService {
 
         applyTemporalStatus(event);
         event = eventRepository.save(event);
+        eventParticipantRepository.save(EventParticipant.builder()
+                .event(event)
+                .user(user)
+                .role(EventParticipantRole.ORGANIZER)
+                .build());
+
+        // Record activity for social feed
+        try {
+            socialService.recordActivity(user, "EVENT_CREATE", "EVENT",
+                    String.valueOf(event.getId()), event.getTitle(), null);
+        } catch (Exception ignored) {}
+
         return toResponse(event, user.getId());
     }
 
@@ -186,6 +209,9 @@ public class EventServiceImpl implements EventService {
             throw new RuntimeException("Only the organizer can delete this event");
         }
 
+        eventChatMessageKeyRepository.deleteByMessageEventId(eventId);
+        eventChatMessageRepository.deleteByEventId(eventId);
+        eventParticipantRepository.deleteByEventId(eventId);
         eventRepository.delete(event);
     }
 
@@ -237,12 +263,32 @@ public class EventServiceImpl implements EventService {
             throw new RuntimeException("Cannot join a completed event");
         }
 
+        if (event.getOrganizer().getId().equals(user.getId())) {
+            return toResponse(event, user.getId());
+        }
+
+        if (eventParticipantRepository.existsByEventIdAndUserId(eventId, user.getId())) {
+            throw new RuntimeException("You have already joined this event");
+        }
+
         if (event.getMaxAttendees() != null && event.getCurrentAttendees() >= event.getMaxAttendees()) {
             throw new RuntimeException("Event is full");
         }
 
+        eventParticipantRepository.save(EventParticipant.builder()
+                .event(event)
+                .user(user)
+                .role(EventParticipantRole.ATTENDEE)
+                .build());
         event.setCurrentAttendees(event.getCurrentAttendees() + 1);
         event = eventRepository.save(event);
+
+        // Record activity for social feed
+        try {
+            socialService.recordActivity(user, "EVENT_JOIN", "EVENT",
+                    String.valueOf(event.getId()), event.getTitle(), null);
+        } catch (Exception ignored) {}
+
         return toResponse(event, user.getId());
     }
 
@@ -256,6 +302,18 @@ public class EventServiceImpl implements EventService {
             throw new AccessDeniedException("You do not have permission to leave this event");
         }
 
+        if (event.getOrganizer().getId().equals(user.getId())) {
+            throw new RuntimeException("Organizer cannot leave their own event");
+        }
+
+        EventParticipant participant = eventParticipantRepository.findByEventIdAndUserId(eventId, user.getId())
+                .orElseThrow(() -> new RuntimeException("You have not joined this event"));
+
+        if (participant.getRole() == EventParticipantRole.ORGANIZER) {
+            throw new RuntimeException("Organizer cannot leave their own event");
+        }
+
+        eventParticipantRepository.delete(participant);
         if (event.getCurrentAttendees() > 0) {
             event.setCurrentAttendees(event.getCurrentAttendees() - 1);
         }
@@ -296,6 +354,13 @@ public class EventServiceImpl implements EventService {
                 .event(event)
                 .build();
         eventBookmarkRepository.save(bookmark);
+
+        // Record activity for social feed
+        try {
+            socialService.recordActivity(user, "BOOKMARK", "EVENT",
+                    String.valueOf(event.getId()), event.getTitle(), null);
+        } catch (Exception ignored) {}
+
         return true;
     }
 
@@ -306,6 +371,16 @@ public class EventServiceImpl implements EventService {
                 .stream()
                 .map(e -> toResponse(e, user.getId()))
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Long> getJoinedEventIds(AuthUser user) {
+        return eventParticipantRepository.findByUserIdOrderByJoinedAtDesc(user.getId()).stream()
+                .filter(participant -> participant.getRole() == EventParticipantRole.ATTENDEE)
+                .map(participant -> participant.getEvent().getId())
+                .distinct()
+                .toList();
     }
 
     @Override
@@ -384,6 +459,9 @@ public class EventServiceImpl implements EventService {
     private EventResponse toResponse(Event event, Long currentUserId) {
         boolean bookmarked = currentUserId != null
                 && eventBookmarkRepository.existsByUserIdAndEventId(currentUserId, event.getId());
+        boolean joinedByCurrentUser = currentUserId != null
+                && (Objects.equals(event.getOrganizer().getId(), currentUserId)
+                || eventParticipantRepository.existsByEventIdAndUserId(event.getId(), currentUserId));
 
         Long countdownSeconds = null;
         if (event.getStatus() == EventStatus.INCOMING) {
@@ -414,6 +492,7 @@ public class EventServiceImpl implements EventService {
                 .imageUrl(event.getImageUrl())
                 .organizerUsername(event.getOrganizer().getUsername())
                 .organizerId(event.getOrganizer().getId())
+                .joinedByCurrentUser(joinedByCurrentUser)
                 .bookmarked(bookmarked)
                 .countdownSeconds(countdownSeconds)
                 .createdAt(event.getCreatedAt() != null ? event.getCreatedAt().format(DT_FMT) : null)

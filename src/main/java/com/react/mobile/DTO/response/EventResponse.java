@@ -30,6 +30,7 @@ public class EventResponse {
     private String imageUrl;
     private String organizerUsername;
     private Long organizerId;
+    private Boolean joinedByCurrentUser;
     private Boolean bookmarked;
     private Long countdownSeconds;
     private String createdAt;

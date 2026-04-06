@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 
 @Repository
-public interface SocialAuthUserRepository extends JpaRepository<SocialAuthUser, String> { 
+public interface SocialAuthUserRepository extends JpaRepository<SocialAuthUser, java.util.UUID> { 
     Optional<SocialAuthUser> findByProviderAndProviderUserId(String provider, String providerUserId);
     
     /**

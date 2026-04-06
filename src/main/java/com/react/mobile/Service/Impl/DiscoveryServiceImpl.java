@@ -58,6 +58,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
     private final DiscoveryBookmarkRepository discoveryBookmarkRepository;
     private final UserLocationRepository userLocationRepository;
     private final UserProfileRepository userProfileRepository;
+    private final com.react.mobile.Service.SocialService socialService;
     private final ObjectMapper objectMapper;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -526,6 +527,13 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                                     .placeId(placeId)
                                     .build()
                     ));
+
+            // Record activity for social feed
+            try {
+                String placeName = lookupByPlaceId(placeId).map(p -> p.name).orElse(placeId);
+                socialService.recordActivity(authUser, "BOOKMARK", "PLACE", placeId, placeName, null);
+            } catch (Exception ignored) {}
+
             return true;
         }
 

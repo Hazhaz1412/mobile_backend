@@ -55,5 +55,7 @@ public interface EventService {
 
     List<EventResponse> getMyEvents(AuthUser user);
 
+    List<Long> getJoinedEventIds(AuthUser user);
+
     void refreshEventStatuses();
 }

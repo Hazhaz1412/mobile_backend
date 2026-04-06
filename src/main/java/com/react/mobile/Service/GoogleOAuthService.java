@@ -1,10 +1,6 @@
 package com.react.mobile.Service;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
-import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
-import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.JsonFactory;
-import com.google.api.client.json.gson.GsonFactory;
 import com.react.mobile.DTO.request.GoogleOAuthRequest;
 import com.react.mobile.DTO.response.AuthenticationResponse;
 import com.react.mobile.Entity.AuthUser;
@@ -17,13 +13,13 @@ import com.react.mobile.Repository.SocialAuthUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.time.LocalDateTime;
-import java.util.Collections;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -40,9 +36,10 @@ public class GoogleOAuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final JwtService jwtService;
     private final UserMapper userMapper;
+    private final GoogleIdTokenVerifierService googleIdTokenVerifierService;
+    private final PasswordEncoder passwordEncoder;
 
     private static final String GOOGLE_PROVIDER = "google";
-    private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
 
     /**
      * Xác thực Google OAuth token từ React Native client
@@ -50,36 +47,39 @@ public class GoogleOAuthService {
     @Transactional
     public AuthenticationResponse verifyGoogleToken(GoogleOAuthRequest request) {
         try {
-            // 1. Xác thực token từ Google
             GoogleIdToken idToken = verifyIdToken(request.getIdToken());
-            
+
             if (idToken == null) {
-                throw new RuntimeException("Google token xác thực thất bại");
+                throw new IllegalArgumentException("Google token không hợp lệ hoặc đã hết hạn");
             }
 
-            // 2. Lấy thông tin user từ token
             GoogleIdToken.Payload payload = idToken.getPayload();
             String googleUserId = payload.getSubject();
-            String email = payload.getEmail().toLowerCase(Locale.ROOT);
+            String rawEmail = payload.getEmail();
             String name = (String) payload.get("name");
-            String picture = (String) payload.get("picture");
+            Object emailVerified = payload.getEmailVerified();
+
+            if (rawEmail == null || rawEmail.isBlank()) {
+                throw new IllegalArgumentException("Google account chưa cung cấp email hợp lệ");
+            }
+            if (Boolean.FALSE.equals(emailVerified)) {
+                throw new IllegalArgumentException("Email Google chưa được xác minh");
+            }
+            String email = rawEmail.toLowerCase(Locale.ROOT);
 
             log.info("Google OAuth: User={}, Email={}", googleUserId, email);
 
-            // 3. Kiểm tra xem user đã tồn tại chưa
-            AuthUser user = findOrCreateUser(googleUserId, email, name, picture);
+            AuthUser user = findOrCreateUser(email, name);
 
-            // 4. Kiểm tra liên kết social auth
             linkOrUpdateSocialAuth(user, googleUserId, payload);
 
-            // 5. Sinh JWT token
             String jwtToken = jwtService.generateToken(user);
             String refreshToken = jwtService.generateRefreshToken(user);
 
-            // 6. Lưu refresh token
             saveRefreshToken(user, refreshToken);
 
-            // 7. Cập nhật last login
+            user.setEmail(email);
+            user.setIsActive(true);
             user.setLastLogin(LocalDateTime.now());
             authUserRepository.save(user);
 
@@ -91,7 +91,7 @@ public class GoogleOAuthService {
 
         } catch (GeneralSecurityException | IOException e) {
             log.error("Lỗi xác thực Google token: {}", e.getMessage());
-            throw new RuntimeException("Không thể xác thực Google token: " + e.getMessage());
+            throw new IllegalStateException("Không thể xác thực Google token", e);
         }
     }
 
@@ -99,40 +99,32 @@ public class GoogleOAuthService {
      * Xác thực Google ID token sử dụng Google API
      */
     private GoogleIdToken verifyIdToken(String idTokenString) throws GeneralSecurityException, IOException {
-        GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
-                new NetHttpTransport(),
-                JSON_FACTORY)
-                .setAudience(Collections.singletonList(googleClientId))
-                .build();
-
-        try {
-            return verifier.verify(idTokenString);
-        } catch (IllegalArgumentException e) {
-            log.error("Invalid ID token format");
-            return null;
+        if (googleClientId == null || googleClientId.isBlank()) {
+            throw new IllegalStateException("GOOGLE_OAUTH_CLIENT_ID chưa được cấu hình");
         }
+        return googleIdTokenVerifierService.verify(idTokenString, googleClientId);
     }
 
     /**
      * Tìm hoặc tạo user mới từ Google account
      */
-    private AuthUser findOrCreateUser(String googleUserId, String email, String name, String picture) {
-        // 1. Kiểm tra xem user đã tồn tại dùng email
+    private AuthUser findOrCreateUser(String email, String name) {
         var existingUser = authUserRepository.findByEmail(email);
-        
+
         if (existingUser.isPresent()) {
-            return existingUser.get();
+            AuthUser user = existingUser.get();
+            user.setIsActive(true);
+            return user;
         }
 
-        // 2. Nếu chưa có, tạo user mới từ Google
-        String username = generateUniqueUsername(email);
-        
+        String username = generateUniqueUsername(email, name);
+
         AuthUser newUser = AuthUser.builder()
                 .username(username)
                 .email(email)
-                .password("") // Không có password vì dùng OAuth
+                .password(passwordEncoder.encode(UUID.randomUUID().toString()))
                 .uuid(UUID.randomUUID())
-                .isActive(true) // OAuth users được active ngay
+                .isActive(true)
                 .isSuperuser(false)
                 .isStaff(false)
                 .dateJoined(LocalDateTime.now())
@@ -145,24 +137,39 @@ public class GoogleOAuthService {
      * Liên kết hoặc cập nhật social auth record
      */
     private void linkOrUpdateSocialAuth(AuthUser user, String googleUserId, GoogleIdToken.Payload payload) {
-        var socialAuth = socialAuthUserRepository.findByProviderAndProviderUserId(GOOGLE_PROVIDER, googleUserId);
+        var socialAuthByGoogleUserId = socialAuthUserRepository
+                .findByProviderAndProviderUserId(GOOGLE_PROVIDER, googleUserId);
 
-        if (socialAuth.isPresent()) {
-            // Cập nhật existing record
-            SocialAuthUser existing = socialAuth.get();
+        if (socialAuthByGoogleUserId.isPresent()) {
+            SocialAuthUser existing = socialAuthByGoogleUserId.get();
+            if (!existing.getAuthUser().getId().equals(user.getId())) {
+                throw new IllegalArgumentException("Google account này đã liên kết với tài khoản khác");
+            }
+
+            existing.setExtraData(payload.toString());
             existing.setUpdatedAt(LocalDateTime.now());
             socialAuthUserRepository.save(existing);
-        } else {
-            // Tạo mới
-            SocialAuthUser newSocialAuth = SocialAuthUser.builder()
-                    .provider(GOOGLE_PROVIDER)
-                    .providerUserId(googleUserId)
-                    .authUser(user)
-                    .extraData(payload.toString()) // Lưu payload để dùng sau
-                    .createdAt(LocalDateTime.now())
-                    .build();
-            socialAuthUserRepository.save(newSocialAuth);
+            return;
         }
+
+        var socialAuthByUser = socialAuthUserRepository.findByProviderAndAuthUser(GOOGLE_PROVIDER, user);
+        if (socialAuthByUser.isPresent()) {
+            SocialAuthUser existing = socialAuthByUser.get();
+            existing.setProviderUserId(googleUserId);
+            existing.setExtraData(payload.toString());
+            existing.setUpdatedAt(LocalDateTime.now());
+            socialAuthUserRepository.save(existing);
+            return;
+        }
+
+        SocialAuthUser newSocialAuth = SocialAuthUser.builder()
+                .provider(GOOGLE_PROVIDER)
+                .providerUserId(googleUserId)
+                .authUser(user)
+                .extraData(payload.toString())
+                .createdAt(LocalDateTime.now())
+                .build();
+        socialAuthUserRepository.save(newSocialAuth);
     }
 
     /**
@@ -182,8 +189,15 @@ public class GoogleOAuthService {
     /**
      * Tạo username duy nhất từ email
      */
-    private String generateUniqueUsername(String email) {
-        String baseUsername = email.split("@")[0];
+    private String generateUniqueUsername(String email, String displayName) {
+        String baseUsername = (displayName != null && !displayName.isBlank())
+                ? displayName.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "")
+                : email.split("@")[0].replaceAll("[^a-zA-Z0-9._-]", "");
+
+        if (baseUsername.isBlank()) {
+            baseUsername = "user";
+        }
+
         String username = baseUsername;
         int counter = 1;
 
