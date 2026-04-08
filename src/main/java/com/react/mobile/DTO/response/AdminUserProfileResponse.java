@@ -16,6 +16,7 @@ public class AdminUserProfileResponse {
     private Boolean isActive;
     private Boolean isSuperuser;
     private Boolean isStaff;
+    private Long reportCount;
     private String dateJoined;
     private String lastLogin;
     private String firstName;

@@ -1,6 +1,7 @@
 package com.react.mobile.Service;
 
 import com.react.mobile.DTO.request.CreateEventRequest;
+import com.react.mobile.DTO.request.ReportEventRequest;
 import com.react.mobile.DTO.response.EventListResponse;
 import com.react.mobile.DTO.response.EventResponse;
 import com.react.mobile.Entity.AuthUser;
@@ -40,6 +41,8 @@ public interface EventService {
     EventResponse updateEvent(AuthUser user, Long eventId, CreateEventRequest request);
 
     void deleteEvent(AuthUser user, Long eventId);
+
+        void reportEvent(AuthUser user, Long eventId, ReportEventRequest request);
 
     EventResponse approveEvent(AuthUser user, Long eventId);
 

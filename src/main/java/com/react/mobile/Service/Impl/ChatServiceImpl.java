@@ -21,6 +21,7 @@ import com.react.mobile.Repository.EventChatMessageKeyRepository;
 import com.react.mobile.Repository.EventChatMessageRepository;
 import com.react.mobile.Repository.EventParticipantRepository;
 import com.react.mobile.Repository.EventRepository;
+import com.react.mobile.Repository.UserProfileRepository;
 import com.react.mobile.Service.ChatRealtimeNotifier;
 import com.react.mobile.Service.ChatService;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +58,7 @@ public class ChatServiceImpl implements ChatService {
     private final EventChatMessageRepository eventChatMessageRepository;
     private final EventChatMessageKeyRepository eventChatMessageKeyRepository;
     private final ChatRealtimeNotifier chatRealtimeNotifier;
+    private final UserProfileRepository userProfileRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -116,6 +118,10 @@ public class ChatServiceImpl implements ChatService {
                         members.stream().map(AuthUser::getId).toList()
                 ).stream()
                 .collect(Collectors.toMap(item -> item.getUser().getId(), Function.identity()));
+        Map<Long, String> profilePictureMap = userProfileRepository.findByAuthUserIdIn(
+                members.stream().map(AuthUser::getId).toList()
+            ).stream()
+            .collect(Collectors.toMap(item -> item.getAuthUser().getId(), item -> item.getProfilePictureUrl()));
 
         return members.stream()
                 .map(member -> EventChatParticipantResponse.builder()
@@ -127,6 +133,7 @@ public class ChatServiceImpl implements ChatService {
                         .directAllowed(canDirectMessage(event, currentUser, member))
                         .hasChatPublicKey(publicKeys.containsKey(member.getId()))
                         .publicKey(publicKeys.containsKey(member.getId()) ? publicKeys.get(member.getId()).getPublicKey() : null)
+                        .profilePictureUrl(profilePictureMap.get(member.getId()))
                         .build())
                 .toList();
     }
@@ -372,10 +379,20 @@ public class ChatServiceImpl implements ChatService {
 
         Map<Long, String> senderPublicKeys = chatPublicKeyRepository.findByUserIdIn(List.of(message.getSender().getId())).stream()
                 .collect(Collectors.toMap(item -> item.getUser().getId(), ChatPublicKey::getPublicKey));
+        Map<Long, String> senderProfilePictureUrls = userProfileRepository.findByAuthUserIdIn(List.of(message.getSender().getId())).stream()
+            .collect(Collectors.toMap(item -> item.getAuthUser().getId(), item -> item.getProfilePictureUrl()));
 
         Map<Long, EventChatMessageResponse> payloads = new LinkedHashMap<>();
         for (Long userId : recipientIds) {
-            payloads.put(userId, toMessageResponse(message, perUserKey.get(userId), senderPublicKeys.get(message.getSender().getId())));
+            payloads.put(
+                userId,
+                toMessageResponse(
+                    message,
+                    perUserKey.get(userId),
+                    senderPublicKeys.get(message.getSender().getId()),
+                    senderProfilePictureUrls.get(message.getSender().getId())
+                )
+            );
         }
         return payloads;
     }
@@ -394,6 +411,9 @@ public class ChatServiceImpl implements ChatService {
         Map<Long, String> senderPublicKeys = chatPublicKeyRepository.findByUserIdIn(senderIds)
                 .stream()
                 .collect(Collectors.toMap(item -> item.getUser().getId(), ChatPublicKey::getPublicKey));
+        Map<Long, String> senderProfilePictureUrls = userProfileRepository.findByAuthUserIdIn(new ArrayList<>(senderIds))
+            .stream()
+            .collect(Collectors.toMap(item -> item.getAuthUser().getId(), item -> item.getProfilePictureUrl()));
 
         return messages.stream()
                 .map(message -> {
@@ -401,12 +421,22 @@ public class ChatServiceImpl implements ChatService {
                     if (key == null) {
                         throw new RuntimeException("No encrypted message key available for current user");
                     }
-                    return toMessageResponse(message, key, senderPublicKeys.get(message.getSender().getId()));
+                return toMessageResponse(
+                    message,
+                    key,
+                    senderPublicKeys.get(message.getSender().getId()),
+                    senderProfilePictureUrls.get(message.getSender().getId())
+                );
                 })
                 .toList();
     }
 
-    private EventChatMessageResponse toMessageResponse(EventChatMessage message, EventChatMessageKey key, String senderPublicKey) {
+        private EventChatMessageResponse toMessageResponse(
+            EventChatMessage message,
+            EventChatMessageKey key,
+            String senderPublicKey,
+            String senderProfilePictureUrl
+        ) {
         return EventChatMessageResponse.builder()
                 .id(message.getId())
                 .eventId(message.getEvent().getId())
@@ -415,6 +445,7 @@ public class ChatServiceImpl implements ChatService {
                 .senderId(message.getSender().getId())
                 .senderName(message.getSender().getUsername())
                 .senderPublicKey(senderPublicKey)
+            .senderProfilePictureUrl(senderProfilePictureUrl)
                 .recipientId(message.getRecipient() != null ? message.getRecipient().getId() : null)
                 .ciphertext(message.getCiphertext())
                 .contentNonce(message.getContentNonce())

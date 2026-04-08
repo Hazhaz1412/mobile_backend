@@ -1,6 +1,7 @@
 package com.react.mobile.Controller;
 
 import com.react.mobile.DTO.request.CreateEventRequest;
+import com.react.mobile.DTO.request.ReportEventRequest;
 import com.react.mobile.DTO.response.EventListResponse;
 import com.react.mobile.DTO.response.EventResponse;
 import com.react.mobile.Entity.AuthUser;
@@ -76,6 +77,17 @@ public class EventController {
         AuthUser user = resolveUser(userDetails);
         eventService.deleteEvent(user, eventId);
         return ResponseEntity.ok(Map.of("message", "Event deleted successfully"));
+    }
+
+    @PostMapping("/{eventId}/report")
+    public ResponseEntity<Map<String, String>> reportEvent(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable Long eventId,
+            @RequestBody ReportEventRequest request
+    ) {
+        AuthUser user = resolveUser(userDetails);
+        eventService.reportEvent(user, eventId, request);
+        return ResponseEntity.ok(Map.of("message", "Event has been reported"));
     }
 
     @PostMapping("/{eventId}/join")

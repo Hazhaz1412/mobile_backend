@@ -2,6 +2,7 @@ package com.react.mobile.Service;
 
 import com.react.mobile.DTO.response.ActivityFeedResponse;
 import com.react.mobile.DTO.response.UserPublicProfileResponse;
+import com.react.mobile.DTO.request.ReportUserRequest;
 import com.react.mobile.Entity.AuthUser;
 
 import java.util.List;
@@ -14,5 +15,6 @@ public interface SocialService {
     List<UserPublicProfileResponse> searchUsers(AuthUser currentUser, String query, int limit);
     UserPublicProfileResponse getUserProfile(AuthUser currentUser, Long userId);
     List<ActivityFeedResponse> getFeed(AuthUser currentUser, int page, int size);
+    void reportUser(AuthUser currentUser, Long userId, ReportUserRequest request);
     void recordActivity(AuthUser actor, String actionType, String targetType, String targetId, String targetName, String metadata);
 }

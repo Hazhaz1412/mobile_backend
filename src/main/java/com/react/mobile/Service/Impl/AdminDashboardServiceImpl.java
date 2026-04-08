@@ -18,6 +18,7 @@ import com.react.mobile.Repository.EventRepository;
 import com.react.mobile.Repository.LocationHistoryRepository;
 import com.react.mobile.Repository.LoginHistoryRepository;
 import com.react.mobile.Repository.ReviewRepository;
+import com.react.mobile.Repository.UserReportRepository;
 import com.react.mobile.Repository.UserProfileRepository;
 import com.react.mobile.Service.AdminDashboardService;
 import lombok.RequiredArgsConstructor;
@@ -50,6 +51,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     private final LocationHistoryRepository locationHistoryRepository;
     private final DiscoveryBookmarkRepository discoveryBookmarkRepository;
     private final EventBookmarkRepository eventBookmarkRepository;
+    private final UserReportRepository userReportRepository;
 
     private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ISO_LOCAL_DATE;
@@ -84,6 +86,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         List<AdminUserProfileResponse> users = pageResult.getContent().stream()
                 .map(item -> {
                     UserProfile profile = profileByUserId.get(item.getId());
+                long reportCount = userReportRepository.countByReportedUserIdAndResolvedFalse(item.getId());
                     return AdminUserProfileResponse.builder()
                             .id(item.getId())
                             .username(item.getUsername())
@@ -91,6 +94,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                             .isActive(item.getIsActive())
                             .isSuperuser(item.getIsSuperuser())
                             .isStaff(item.getIsStaff())
+                    .reportCount(reportCount)
                             .dateJoined(formatDateTime(item.getDateJoined()))
                             .lastLogin(formatDateTime(item.getLastLogin()))
                             .firstName(profile != null ? profile.getFirstName() : null)

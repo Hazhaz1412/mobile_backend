@@ -19,6 +19,7 @@ import com.react.mobile.Repository.EventRepository;
 import com.react.mobile.Repository.ReviewHelpfulVoteRepository;
 import com.react.mobile.Repository.ReviewRepository;
 import com.react.mobile.Repository.ReviewReportRepository;
+import com.react.mobile.Repository.UserProfileRepository;
 import com.react.mobile.Service.ReviewService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,6 +52,7 @@ public class ReviewServiceImpl implements ReviewService {
     private final ReviewReportRepository reviewReportRepository;
     private final ReviewHelpfulVoteRepository reviewHelpfulVoteRepository;
     private final EventRepository eventRepository;
+    private final UserProfileRepository userProfileRepository;
 
     private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
@@ -378,6 +380,9 @@ public class ReviewServiceImpl implements ReviewService {
                 .photoUrl(review.getPhotoUrl())
                 .authorUsername(review.getUser().getUsername())
                 .authorId(review.getUser().getId())
+            .authorProfilePictureUrl(userProfileRepository.findByAuthUserId(review.getUser().getId())
+                .map(profile -> profile.getProfilePictureUrl())
+                .orElse(null))
                 .helpfulCount(defaultLong(review.getHelpfulCount()))
                 .helpfulByCurrentUser(helpfulMap.getOrDefault(reviewId, false))
                 .flagCount(defaultLong(review.getFlagCount()))

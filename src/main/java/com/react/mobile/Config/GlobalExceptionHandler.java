@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -118,6 +119,17 @@ public class GlobalExceptionHandler {
             HttpStatus.BAD_REQUEST,
             "Bad Request",
             ex.getMessage(),
+            request.getRequestURI(),
+            ex
+        );
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex, HttpServletRequest request) {
+        return buildErrorResponse(
+            HttpStatus.PAYLOAD_TOO_LARGE,
+            "Payload Too Large",
+            "Profile picture must be <= 5MB",
             request.getRequestURI(),
             ex
         );

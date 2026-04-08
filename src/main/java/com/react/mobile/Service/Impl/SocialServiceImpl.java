@@ -1,15 +1,18 @@
 package com.react.mobile.Service.Impl;
 
 import com.react.mobile.DTO.response.ActivityFeedResponse;
+import com.react.mobile.DTO.request.ReportUserRequest;
 import com.react.mobile.DTO.response.UserPublicProfileResponse;
 import com.react.mobile.Entity.ActivityFeedItem;
 import com.react.mobile.Entity.AuthUser;
 import com.react.mobile.Entity.UserFollow;
 import com.react.mobile.Entity.UserProfile;
+import com.react.mobile.Entity.UserReport;
 import com.react.mobile.Repository.ActivityFeedItemRepository;
 import com.react.mobile.Repository.AuthUserRepository;
 import com.react.mobile.Repository.UserFollowRepository;
 import com.react.mobile.Repository.UserProfileRepository;
+import com.react.mobile.Repository.UserReportRepository;
 import com.react.mobile.Service.SocialService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -28,6 +31,7 @@ public class SocialServiceImpl implements SocialService {
     private final ActivityFeedItemRepository activityFeedItemRepository;
     private final AuthUserRepository authUserRepository;
     private final UserProfileRepository userProfileRepository;
+    private final UserReportRepository userReportRepository;
 
     @Override
     @Transactional
@@ -127,6 +131,31 @@ public class SocialServiceImpl implements SocialService {
                 .build());
     }
 
+    @Override
+    @Transactional
+    public void reportUser(AuthUser currentUser, Long userId, ReportUserRequest request) {
+        if (currentUser.getId().equals(userId)) {
+            throw new IllegalArgumentException("You cannot report yourself");
+        }
+
+        AuthUser reportedUser = authUserRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        if (userReportRepository.existsByReportedUserIdAndReporterIdAndResolvedFalse(userId, currentUser.getId())) {
+            throw new IllegalArgumentException("You have already reported this user");
+        }
+
+        String reason = requireText(request != null ? request.getReason() : null, "Report reason is required");
+        String details = cleanOptionalText(request != null ? request.getDetails() : null);
+
+        userReportRepository.save(UserReport.builder()
+                .reportedUser(reportedUser)
+                .reporter(currentUser)
+                .reason(reason)
+                .details(details)
+                .build());
+    }
+
     private UserPublicProfileResponse toPublicProfile(AuthUser viewer, AuthUser user) {
         UserProfile profile = userProfileRepository.findByAuthUserId(user.getId()).orElse(null);
         boolean followed = !viewer.getId().equals(user.getId()) &&
@@ -159,5 +188,21 @@ public class SocialServiceImpl implements SocialService {
                 .metadata(item.getMetadata())
                 .createdAt(item.getCreatedAt() != null ? item.getCreatedAt().toString() : null)
                 .build();
+    }
+
+    private String requireText(String value, String message) {
+        String cleaned = cleanOptionalText(value);
+        if (cleaned == null) {
+            throw new IllegalArgumentException(message);
+        }
+        return cleaned;
+    }
+
+    private String cleanOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String cleaned = value.trim();
+        return cleaned.isEmpty() ? null : cleaned;
     }
 }

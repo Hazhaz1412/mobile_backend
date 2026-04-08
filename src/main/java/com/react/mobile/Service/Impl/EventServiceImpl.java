@@ -1,11 +1,13 @@
 package com.react.mobile.Service.Impl;
 
 import com.react.mobile.DTO.request.CreateEventRequest;
+import com.react.mobile.DTO.request.ReportEventRequest;
 import com.react.mobile.DTO.response.EventListResponse;
 import com.react.mobile.DTO.response.EventResponse;
 import com.react.mobile.Entity.AuthUser;
 import com.react.mobile.Entity.Event;
 import com.react.mobile.Entity.EventBookmark;
+import com.react.mobile.Entity.EventReport;
 import com.react.mobile.Entity.Enums.EventParticipantRole;
 import com.react.mobile.Entity.Enums.EventModerationStatus;
 import com.react.mobile.Entity.Enums.EventStatus;
@@ -14,6 +16,7 @@ import com.react.mobile.Entity.EventParticipant;
 import com.react.mobile.Repository.EventChatMessageKeyRepository;
 import com.react.mobile.Repository.EventChatMessageRepository;
 import com.react.mobile.Repository.EventBookmarkRepository;
+import com.react.mobile.Repository.EventReportRepository;
 import com.react.mobile.Repository.EventParticipantRepository;
 import com.react.mobile.Repository.EventRepository;
 import com.react.mobile.Service.EventService;
@@ -40,6 +43,7 @@ public class EventServiceImpl implements EventService {
 
     private final EventRepository eventRepository;
     private final EventBookmarkRepository eventBookmarkRepository;
+    private final EventReportRepository eventReportRepository;
     private final EventParticipantRepository eventParticipantRepository;
     private final EventChatMessageRepository eventChatMessageRepository;
     private final EventChatMessageKeyRepository eventChatMessageKeyRepository;
@@ -212,7 +216,38 @@ public class EventServiceImpl implements EventService {
         eventChatMessageKeyRepository.deleteByMessageEventId(eventId);
         eventChatMessageRepository.deleteByEventId(eventId);
         eventParticipantRepository.deleteByEventId(eventId);
+        eventReportRepository.deleteByEventId(eventId);
         eventRepository.delete(event);
+    }
+
+    @Override
+    @Transactional
+    public void reportEvent(AuthUser user, Long eventId, ReportEventRequest request) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new IllegalArgumentException("Event not found"));
+
+        if (event.getOrganizer() != null && event.getOrganizer().getId() != null
+                && event.getOrganizer().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("You cannot report your own event");
+        }
+
+        if (eventReportRepository.existsByEventIdAndReporterIdAndResolvedFalse(eventId, user.getId())) {
+            throw new IllegalArgumentException("You have already reported this event");
+        }
+
+        String reason = requireText(request != null ? request.getReason() : null, "Report reason is required");
+        String details = cleanOptionalText(request != null ? request.getDetails() : null);
+
+        eventReportRepository.save(EventReport.builder()
+                .event(event)
+                .reporter(user)
+                .reason(reason)
+                .details(details)
+                .build());
+
+        event.setModerationStatus(EventModerationStatus.PENDING);
+        event.setModerationReason(reason);
+        eventRepository.save(event);
     }
 
     @Override
@@ -226,6 +261,7 @@ public class EventServiceImpl implements EventService {
         event.setModerationStatus(EventModerationStatus.APPROVED);
         event.setModerationReason(null);
         event = eventRepository.save(event);
+        resolveReportsForEvent(eventId);
 
         return toResponse(event, user.getId());
     }
@@ -245,6 +281,7 @@ public class EventServiceImpl implements EventService {
         event.setModerationStatus(EventModerationStatus.REJECTED);
         event.setModerationReason(reason.trim());
         event = eventRepository.save(event);
+        resolveReportsForEvent(eventId);
 
         return toResponse(event, user.getId());
     }
@@ -470,6 +507,7 @@ public class EventServiceImpl implements EventService {
         }
 
         EventModerationStatus moderationStatus = resolveModerationStatus(event);
+        long reportCount = eventReportRepository.countByEventIdAndResolvedFalse(event.getId());
 
         return EventResponse.builder()
                 .id(event.getId())
@@ -492,6 +530,7 @@ public class EventServiceImpl implements EventService {
                 .imageUrl(event.getImageUrl())
                 .organizerUsername(event.getOrganizer().getUsername())
                 .organizerId(event.getOrganizer().getId())
+                .reportCount(reportCount)
                 .joinedByCurrentUser(joinedByCurrentUser)
                 .bookmarked(bookmarked)
                 .countdownSeconds(countdownSeconds)
@@ -531,6 +570,31 @@ public class EventServiceImpl implements EventService {
 
     private EventModerationStatus resolveModerationStatus(Event event) {
         return event.getModerationStatus() == null ? EventModerationStatus.APPROVED : event.getModerationStatus();
+    }
+
+    private void resolveReportsForEvent(Long eventId) {
+        List<EventReport> activeReports = eventReportRepository.findByEventIdInAndResolvedFalse(List.of(eventId));
+        if (activeReports.isEmpty()) {
+            return;
+        }
+        activeReports.forEach(report -> report.setResolved(true));
+        eventReportRepository.saveAll(activeReports);
+    }
+
+    private String requireText(String value, String message) {
+        String cleaned = cleanOptionalText(value);
+        if (cleaned == null) {
+            throw new IllegalArgumentException(message);
+        }
+        return cleaned;
+    }
+
+    private String cleanOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String cleaned = value.trim();
+        return cleaned.isEmpty() ? null : cleaned;
     }
 
     private EventStatus parseEventStatus(String value) {

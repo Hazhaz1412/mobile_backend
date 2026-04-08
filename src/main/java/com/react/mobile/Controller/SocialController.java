@@ -2,6 +2,7 @@ package com.react.mobile.Controller;
 
 import com.react.mobile.DTO.response.ActivityFeedResponse;
 import com.react.mobile.DTO.response.UserPublicProfileResponse;
+import com.react.mobile.DTO.request.ReportUserRequest;
 import com.react.mobile.Entity.AuthUser;
 import com.react.mobile.Repository.AuthUserRepository;
 import com.react.mobile.Service.SocialService;
@@ -73,6 +74,17 @@ public class SocialController {
             @PathVariable Long userId
     ) {
         return ResponseEntity.ok(socialService.getUserProfile(resolveUser(userDetails), userId));
+    }
+
+    @PostMapping("/user/{userId}/report")
+    public ResponseEntity<Map<String, String>> reportUser(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable Long userId,
+            @RequestBody ReportUserRequest request
+    ) {
+        AuthUser currentUser = resolveUser(userDetails);
+        socialService.reportUser(currentUser, userId, request);
+        return ResponseEntity.ok(Map.of("message", "User has been reported"));
     }
 
     @GetMapping("/feed")

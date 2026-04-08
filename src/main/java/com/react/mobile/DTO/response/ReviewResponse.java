@@ -22,6 +22,7 @@ public class ReviewResponse {
     private String photoUrl;
     private String authorUsername;
     private Long authorId;
+    private String authorProfilePictureUrl;
     private Long helpfulCount;
     private Boolean helpfulByCurrentUser;
     private Long flagCount;

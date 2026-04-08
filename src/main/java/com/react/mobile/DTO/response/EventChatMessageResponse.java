@@ -18,6 +18,7 @@ public class EventChatMessageResponse {
     private Long senderId;
     private String senderName;
     private String senderPublicKey;
+    private String senderProfilePictureUrl;
     private Long recipientId;
     private String ciphertext;
     private String contentNonce;

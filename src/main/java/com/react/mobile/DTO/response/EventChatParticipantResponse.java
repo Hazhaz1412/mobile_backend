@@ -19,4 +19,5 @@ public class EventChatParticipantResponse {
     private Boolean directAllowed;
     private Boolean hasChatPublicKey;
     private String publicKey;
+    private String profilePictureUrl;
 }
