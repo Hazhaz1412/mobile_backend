@@ -38,6 +38,8 @@ server:
 
 app:
   debug: ${DEBUG:true}
+  discovery:
+    local-fallback-enabled: ${DISCOVERY_LOCAL_FALLBACK_ENABLED:false}
 
 grpc:
   go-service:

@@ -23,6 +23,11 @@ public class DiscoveryBrowseResponse {
     private Double referenceLongitude;
     private List<String> autocompleteSuggestions;
     private List<DiscoveryItemResponse> items;
+    private String personalizationTimeBucket;
+    private String personalizationWeather;
+    private String personalizationSeason;
+    private List<String> personalizationReasons;
+    private List<String> personalizationInterests;
     @Builder.Default
     private Integer page = 0;
     @Builder.Default

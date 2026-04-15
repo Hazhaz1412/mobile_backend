@@ -9,6 +9,10 @@ public interface AdminDashboardService {
 
     AdminUserListResponse listUsers(AuthUser user, String search, int page, int size);
 
+    AdminUserListResponse banUser(AuthUser user, Long userId);
+
+    AdminUserListResponse unbanUser(AuthUser user, Long userId);
+
     AdminReviewListResponse listReviews(AuthUser user, String moderationStatus, String search, int page, int size);
 
     AdminAnalyticsResponse getAnalytics(AuthUser user, Integer windowDays);

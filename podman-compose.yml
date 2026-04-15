@@ -7,7 +7,7 @@ services:
       target: build
     image: mobile-backend-dev
     working_dir: /app
-    command: ["./mvnw","spring-boot:run","-Dspring-boot.run.profiles=dev"]
+    command: ["./mvnw","clean","spring-boot:run","-Dspring-boot.run.profiles=dev"]
     ports:
       - "8082:8082"
     environment:

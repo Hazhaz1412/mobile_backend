@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -55,6 +56,11 @@ public class EventServiceImpl implements EventService {
     @Override
     @Transactional
     public EventResponse createEvent(AuthUser user, CreateEventRequest req) {
+        LocalDateTime startDate = parseEventDate(req.getStartDate(), "startDate");
+        LocalDateTime endDate = parseEventDate(req.getEndDate(), "endDate");
+        validateDateRange(startDate, endDate);
+        validateMaxAttendees(req.getMaxAttendees(), null);
+
         Event event = Event.builder()
                 .title(req.getTitle())
                 .description(req.getDescription())
@@ -62,8 +68,8 @@ public class EventServiceImpl implements EventService {
                 .isFree(req.getIsFree() != null ? req.getIsFree() : true)
                 .price(req.getPrice())
                 .currency(req.getCurrency() != null ? req.getCurrency() : "VND")
-                .startDate(LocalDateTime.parse(req.getStartDate(), DT_FMT))
-                .endDate(LocalDateTime.parse(req.getEndDate(), DT_FMT))
+            .startDate(startDate)
+            .endDate(endDate)
                 .latitude(req.getLatitude())
                 .longitude(req.getLongitude())
                 .locationName(req.getLocationName())
@@ -186,12 +192,23 @@ public class EventServiceImpl implements EventService {
         if (req.getIsFree() != null) event.setIsFree(req.getIsFree());
         if (req.getPrice() != null) event.setPrice(req.getPrice());
         if (req.getCurrency() != null) event.setCurrency(req.getCurrency());
-        if (req.getStartDate() != null) event.setStartDate(LocalDateTime.parse(req.getStartDate(), DT_FMT));
-        if (req.getEndDate() != null) event.setEndDate(LocalDateTime.parse(req.getEndDate(), DT_FMT));
+        LocalDateTime nextStartDate = req.getStartDate() != null
+            ? parseEventDate(req.getStartDate(), "startDate")
+            : event.getStartDate();
+        LocalDateTime nextEndDate = req.getEndDate() != null
+            ? parseEventDate(req.getEndDate(), "endDate")
+            : event.getEndDate();
+        validateDateRange(nextStartDate, nextEndDate);
+
+        if (req.getStartDate() != null) event.setStartDate(nextStartDate);
+        if (req.getEndDate() != null) event.setEndDate(nextEndDate);
         if (req.getLatitude() != null) event.setLatitude(req.getLatitude());
         if (req.getLongitude() != null) event.setLongitude(req.getLongitude());
         if (req.getLocationName() != null) event.setLocationName(req.getLocationName());
-        if (req.getMaxAttendees() != null) event.setMaxAttendees(req.getMaxAttendees());
+        if (req.getMaxAttendees() != null) {
+            validateMaxAttendees(req.getMaxAttendees(), event.getCurrentAttendees());
+            event.setMaxAttendees(req.getMaxAttendees());
+        }
         if (req.getImageUrl() != null) event.setImageUrl(req.getImageUrl());
 
         applyTemporalStatus(event);
@@ -595,6 +612,38 @@ public class EventServiceImpl implements EventService {
         }
         String cleaned = value.trim();
         return cleaned.isEmpty() ? null : cleaned;
+    }
+
+    private LocalDateTime parseEventDate(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(fieldName + " is required");
+        }
+        try {
+            return LocalDateTime.parse(value, DT_FMT);
+        } catch (DateTimeParseException ex) {
+            throw new IllegalArgumentException(fieldName + " must be ISO date-time (yyyy-MM-ddTHH:mm:ss)");
+        }
+    }
+
+    private void validateDateRange(LocalDateTime startDate, LocalDateTime endDate) {
+        if (startDate == null || endDate == null) {
+            throw new IllegalArgumentException("startDate and endDate are required");
+        }
+        if (!endDate.isAfter(startDate)) {
+            throw new IllegalArgumentException("endDate must be greater than startDate");
+        }
+    }
+
+    private void validateMaxAttendees(Integer maxAttendees, Integer currentAttendees) {
+        if (maxAttendees == null) {
+            return;
+        }
+        if (maxAttendees <= 0) {
+            throw new IllegalArgumentException("maxAttendees must be a positive number");
+        }
+        if (currentAttendees != null && maxAttendees < currentAttendees) {
+            throw new IllegalArgumentException("maxAttendees cannot be less than current attendees");
+        }
     }
 
     private EventStatus parseEventStatus(String value) {

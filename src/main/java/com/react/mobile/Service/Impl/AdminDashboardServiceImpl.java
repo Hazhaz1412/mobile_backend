@@ -119,6 +119,38 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     }
 
     @Override
+    @Transactional
+    public AdminUserListResponse banUser(AuthUser user, Long userId) {
+        return setUserActiveState(user, userId, false);
+    }
+
+    @Override
+    @Transactional
+    public AdminUserListResponse unbanUser(AuthUser user, Long userId) {
+        return setUserActiveState(user, userId, true);
+    }
+
+    private AdminUserListResponse setUserActiveState(AuthUser user, Long userId, boolean active) {
+        ensureAdmin(user);
+
+        if (userId == null) {
+            throw new IllegalArgumentException("User id is required");
+        }
+
+        if (Objects.equals(user.getId(), userId)) {
+            throw new IllegalArgumentException("You cannot change your own account status");
+        }
+
+        AuthUser target = authUserRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        target.setIsActive(active);
+        authUserRepository.save(target);
+
+        return listUsers(user, null, 0, 10);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public AdminReviewListResponse listReviews(AuthUser user, String moderationStatus, String search, int page, int size) {
         ensureAdmin(user);

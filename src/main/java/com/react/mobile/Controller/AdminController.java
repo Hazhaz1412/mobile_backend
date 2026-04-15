@@ -49,6 +49,24 @@ public class AdminController {
         return ResponseEntity.ok(adminDashboardService.listUsers(user, search, page, size));
     }
 
+    @PostMapping("/users/{userId}/ban")
+    public ResponseEntity<AdminUserListResponse> banUser(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable Long userId
+    ) {
+        AuthUser user = resolveUser(userDetails);
+        return ResponseEntity.ok(adminDashboardService.banUser(user, userId));
+    }
+
+    @PostMapping("/users/{userId}/unban")
+    public ResponseEntity<AdminUserListResponse> unbanUser(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable Long userId
+    ) {
+        AuthUser user = resolveUser(userDetails);
+        return ResponseEntity.ok(adminDashboardService.unbanUser(user, userId));
+    }
+
     @GetMapping("/events")
     public ResponseEntity<EventListResponse> listEvents(
             @AuthenticationPrincipal UserDetails userDetails,

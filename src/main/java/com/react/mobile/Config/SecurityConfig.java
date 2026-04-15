@@ -20,8 +20,6 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.List;
-
 @Configuration(proxyBeanMethods = false)
 @RequiredArgsConstructor
 public class SecurityConfig {
@@ -77,7 +75,7 @@ public class SecurityConfig {
         configuration.addAllowedOriginPattern("*"); // Cho phép tất cả origin
         configuration.addAllowedHeader("*"); // Cho phép tất cả header
         configuration.addAllowedMethod("*"); // Cho phép tất cả method
-        configuration.setAllowCredentials(true); // Nếu không cần cookie, có thể set false
+        configuration.setAllowCredentials(false); // Mở hoàn toàn, không dùng cookie cho CORS
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -92,8 +90,7 @@ public class SecurityConfig {
 
     @Bean
     public AuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
-        authProvider.setUserDetailsService(userDetailsService);
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider(userDetailsService);
         authProvider.setPasswordEncoder(passwordEncoder());
         return authProvider;
     }

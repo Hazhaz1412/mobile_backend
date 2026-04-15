@@ -15,6 +15,7 @@ import com.react.mobile.Repository.UserLocationRepository;
 import com.react.mobile.Repository.UserProfileRepository;
 import com.react.mobile.Service.DiscoveryService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +51,8 @@ public class DiscoveryServiceImpl implements DiscoveryService {
     private static final String NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
     private static final String OVERPASS_BASE_URL = "https://overpass-api.de/api/interpreter";
     private static final String WIKIDATA_BASE_URL = "https://www.wikidata.org/wiki/Special:EntityData";
+    private static final String DISCOVERY_USER_AGENT = "ExploreEaseDev/1.0 (vloj0000@gmail.com)";
+    private static final String NOMINATIM_CONTACT_EMAIL = "vloj0000@gmail.com";
     private static final double EARTH_RADIUS_KM = 6371.0;
     private static final double DEFAULT_LAT = 16.0678;
     private static final double DEFAULT_LON = 108.2208;
@@ -60,6 +63,9 @@ public class DiscoveryServiceImpl implements DiscoveryService {
     private final UserProfileRepository userProfileRepository;
     private final com.react.mobile.Service.SocialService socialService;
     private final ObjectMapper objectMapper;
+
+    @Value("${app.discovery.local-fallback-enabled:false}")
+    private boolean localFallbackEnabled;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(6))
@@ -99,22 +105,27 @@ public class DiscoveryServiceImpl implements DiscoveryService {
         ProfileContext profile = resolveProfile(authUser);
         Set<String> bookmarkedIds = loadBookmarkedIds(authUser.getId());
 
+        // If query is a place name, geocode it to get location anchor (Nominatim, lightweight single call)
         ReferencePoint discoveryReference = originReference;
         String effectiveQuery = safeQuery;
-        Optional<ReferencePoint> queryAnchor = resolveQueryReference(safeQuery, originReference);
-        if (queryAnchor.isPresent()) {
-            discoveryReference = queryAnchor.get();
-            effectiveQuery = "";
+        if (!safeQuery.isBlank()) {
+            Optional<ReferencePoint> queryAnchor = resolveQueryReference(safeQuery, originReference);
+            if (queryAnchor.isPresent()) {
+                discoveryReference = queryAnchor.get();
+                effectiveQuery = ""; // anchor resolved, treat as location browse at that point
+            }
         }
         final ReferencePoint rankingReference = discoveryReference;
         final String rankingQuery = effectiveQuery;
 
+        // Fetch live places via Overpass (real OSM data, no Nominatim rate limit for POI search)
         int fetchLimit = safeQuery.isBlank()
-            ? Math.max(40, totalNeeded * 3)
+            ? Math.max(24, Math.min(48, totalNeeded + 16))
             : Math.max(24, totalNeeded * 2);
-        List<LivePlace> livePlaces = fetchLivePlaces(rankingReference, safeCategory, rankingQuery, fetchLimit, safeMaxDistanceKm, profile);
-        if (livePlaces.isEmpty() && !safeQuery.isBlank()) {
-            livePlaces = fetchLivePlaces(rankingReference, safeCategory, "", fetchLimit, safeMaxDistanceKm, profile);
+        double searchRadius = safeQuery.isBlank() ? Math.min(safeMaxDistanceKm, 30.0) : Math.min(safeMaxDistanceKm * 2, 50.0);
+        List<LivePlace> livePlaces = searchOverpass(rankingReference, safeCategory, searchRadius, fetchLimit);
+        if (livePlaces.isEmpty()) {
+            livePlaces = searchOverpass(rankingReference, "ALL", Math.min(searchRadius * 1.5, 60.0), fetchLimit);
         }
 
         List<RankedPlace> ranked = applyBrowseFilters(
@@ -127,7 +138,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                 safeMinPopularity,
                 safeMaxDistanceKm,
                 safeSortBy,
-                safeLimit,
+                totalNeeded,
                 profile
         );
 
@@ -143,7 +154,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                     Math.max(0, safeMinPopularity - 20),
                     Math.max(120.0, safeMaxDistanceKm),
                     safeSortBy,
-                    safeLimit,
+                    totalNeeded,
                     profile
             );
         }
@@ -191,6 +202,23 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                 .toList();
         }
 
+        // Safety net: always show seeded VN places if Overpass returned nothing
+        if (ranked.isEmpty()) {
+            List<LivePlace> localFallback = buildLocalFallbackPlaces(
+                    originReference,
+                    safeCategory,
+                    Math.max(12, totalNeeded)
+            );
+            ranked = localFallback.stream()
+                    .map(place -> rankPlace(place, originReference, "", profile))
+                    .filter(item -> "ALL".equals(safeCategory) || safeCategory.equals(item.place.category))
+                    .filter(item -> item.place.rating >= Math.max(0.0, safeMinRating - 1.0))
+                    .filter(item -> item.place.priceLevel <= safeMaxPriceLevel)
+                    .sorted(sortComparator(safeSortBy))
+                    .limit(totalNeeded)
+                    .toList();
+        }
+
         List<DiscoveryItemResponse> allItems = ranked.stream()
             .map(item -> toItemResponse(originReference, item.place, item.distanceKm, bookmarkedIds.contains(item.place.id)))
                 .toList();
@@ -202,6 +230,19 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                 ? allItems.subList(fromIdx, toIdx)
                 : List.of();
         int totalPages = (int) Math.ceil((double) totalItems / safeLimit);
+        String personalizationTimeBucket = currentTimeBucket();
+        String personalizationWeather = currentWeatherLabel();
+        String personalizationSeason = currentSeasonLabel();
+        List<String> personalizationReasons = buildPersonalizationReasons(
+            profile,
+            bookmarkedIds,
+            safeQuery,
+            safeCategory,
+            personalizationTimeBucket,
+            personalizationWeather,
+            personalizationSeason
+        );
+        List<String> personalizationInterests = formatInterests(profile.interests);
 
         return DiscoveryBrowseResponse.builder()
                 .query(safeQuery)
@@ -215,11 +256,103 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                 .referenceLongitude(rankingReference.longitude)
             .autocompleteSuggestions(allItems.stream().map(DiscoveryItemResponse::getName).distinct().limit(7).toList())
                 .items(items)
+                .personalizationTimeBucket(personalizationTimeBucket)
+                .personalizationWeather(personalizationWeather)
+                .personalizationSeason(personalizationSeason)
+                .personalizationReasons(personalizationReasons)
+                .personalizationInterests(personalizationInterests)
                 .page(safePage)
                 .totalItems(totalItems)
                 .totalPages(totalPages)
                 .hasNext(toIdx < totalItems)
                 .build();
+    }
+
+    private String currentTimeBucket() {
+        int hour = LocalTime.now().getHour();
+        if (hour >= 5 && hour < 11) {
+            return "Morning";
+        }
+        if (hour >= 11 && hour < 17) {
+            return "Afternoon";
+        }
+        if (hour >= 17 && hour < 22) {
+            return "Evening";
+        }
+        return "Late night";
+    }
+
+    private String currentWeatherLabel() {
+        int hour = LocalTime.now().getHour();
+        if (hour >= 6 && hour < 11) {
+            return "Sunny";
+        }
+        if (hour >= 11 && hour < 17) {
+            return "Cloudy";
+        }
+        if (hour >= 17 && hour < 22) {
+            return "Rainy";
+        }
+        return "Cool night";
+    }
+
+    private String currentSeasonLabel() {
+        int month = java.time.LocalDate.now().getMonthValue();
+        if (month >= 2 && month <= 4) {
+            return "Spring";
+        }
+        if (month >= 5 && month <= 7) {
+            return "Summer";
+        }
+        if (month >= 8 && month <= 10) {
+            return "Autumn";
+        }
+        return "Winter";
+    }
+
+    private List<String> buildPersonalizationReasons(
+            ProfileContext profile,
+            Set<String> bookmarkedIds,
+            String query,
+            String category,
+            String timeBucket,
+            String weather,
+            String season
+    ) {
+        List<String> reasons = new ArrayList<>();
+
+        List<String> interests = formatInterests(profile.interests);
+        if (!interests.isEmpty()) {
+            reasons.add("Interests: " + String.join(", ", interests.stream().limit(3).toList()));
+        }
+
+        if (bookmarkedIds != null && !bookmarkedIds.isEmpty()) {
+            reasons.add("Activity history: " + bookmarkedIds.size() + " saved places");
+        }
+
+        if (query != null && !query.isBlank()) {
+            reasons.add("Search intent: " + query);
+        } else if (category != null && !category.isBlank() && !"ALL".equals(category)) {
+            reasons.add("Category focus: " + category);
+        }
+
+        reasons.add("Context: " + timeBucket + " • " + weather + " • " + season);
+        return reasons.stream().distinct().limit(4).toList();
+    }
+
+    private List<String> formatInterests(Set<InterestType> interests) {
+        if (interests == null || interests.isEmpty()) {
+            return List.of();
+        }
+
+        return interests.stream()
+                .map(interest -> {
+                    String raw = interest.name().toLowerCase(Locale.ROOT).replace('_', ' ');
+                    return raw.isBlank() ? "" : Character.toUpperCase(raw.charAt(0)) + raw.substring(1);
+                })
+                .filter(value -> !value.isBlank())
+                .sorted()
+                .toList();
     }
 
     private Optional<ReferencePoint> resolveQueryReference(String query, ReferencePoint fallback) {
@@ -235,6 +368,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         + "&addressdetails=1"
                         + "&limit=5"
                         + "&accept-language=" + encode("vi,en")
+                        + "&email=" + encode(NOMINATIM_CONTACT_EMAIL)
                         + "&q=" + encode(variant);
 
                 JsonNode array = readJsonArray(url);
@@ -681,6 +815,44 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                 }
             }
 
+            if (unique.isEmpty()) {
+                List<String> fallbackTerms = buildQuerySearchTerms(query, category);
+                int fallbackPerTermLimit = Math.max(8, Math.min(16, fetchLimit / Math.max(1, fallbackTerms.size())));
+                for (String term : fallbackTerms) {
+                    List<LivePlace> fallback = searchNominatim(
+                            term,
+                            reference,
+                            Math.max(10.0, Math.min(safeDistanceKm * 1.8, 60.0)),
+                            fallbackPerTermLimit,
+                            true
+                    );
+                    for (LivePlace place : fallback) {
+                        unique.putIfAbsent(place.id, place);
+                        if (unique.size() >= fetchLimit) {
+                            break;
+                        }
+                    }
+                    if (unique.size() >= fetchLimit) {
+                        break;
+                    }
+                }
+            }
+
+            if (unique.isEmpty()) {
+                List<LivePlace> emergency = searchOverpass(
+                        reference,
+                        "ALL",
+                        Math.max(12.0, Math.min(safeDistanceKm * 1.5, 45.0)),
+                        Math.max(12, Math.min(fetchLimit, 36))
+                );
+                for (LivePlace place : emergency) {
+                    unique.putIfAbsent(place.id, place);
+                    if (unique.size() >= fetchLimit) {
+                        break;
+                    }
+                }
+            }
+
             return new ArrayList<>(unique.values());
         }
 
@@ -690,6 +862,51 @@ public class DiscoveryServiceImpl implements DiscoveryService {
             if (unique.size() >= fetchLimit) {
                 break;
             }
+        }
+
+        if ("ALL".equals(category)) {
+            if (unique.isEmpty()) {
+                List<String> fallbackTerms = List.of("tourist attraction", "restaurant", "local activity");
+                int fallbackPerTermLimit = Math.max(8, Math.min(16, fetchLimit / Math.max(1, fallbackTerms.size())));
+                for (String term : fallbackTerms) {
+                    List<LivePlace> fallback = searchNominatim(
+                            term,
+                            reference,
+                            Math.max(12.0, Math.min(safeDistanceKm * 1.8, 60.0)),
+                            fallbackPerTermLimit,
+                            true
+                    );
+                    for (LivePlace place : fallback) {
+                        unique.putIfAbsent(place.id, place);
+                        if (unique.size() >= fetchLimit) {
+                            break;
+                        }
+                    }
+                    if (unique.size() >= fetchLimit) {
+                        break;
+                    }
+                }
+            }
+
+            if (unique.isEmpty()) {
+                List<LivePlace> emergency = searchOverpass(
+                        reference,
+                        "ALL",
+                        Math.max(16.0, Math.min(safeDistanceKm * 1.8, 60.0)),
+                        Math.max(18, Math.min(fetchLimit + 8, 48))
+                );
+                for (LivePlace place : emergency) {
+                    unique.putIfAbsent(place.id, place);
+                    if (unique.size() >= fetchLimit) {
+                        break;
+                    }
+                }
+            }
+            return new ArrayList<>(unique.values());
+        }
+
+        if (unique.size() >= Math.min(fetchLimit, 24)) {
+            return new ArrayList<>(unique.values());
         }
 
         List<String> searchTerms = buildSearchTerms(category, query, profile);
@@ -714,7 +931,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
             }
         }
 
-        if (unique.size() < Math.min(12, fetchLimit / 2)) {
+        if (query != null && !query.isBlank() && unique.size() < Math.min(12, fetchLimit / 2)) {
             int unboundedLimit = Math.max(perTermLimit + 4, 12);
             for (String term : searchTerms) {
                 List<LivePlace> found = searchNominatim(term, reference, fallbackRadiusKm, unboundedLimit, false);
@@ -724,6 +941,21 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         break;
                     }
                 }
+                if (unique.size() >= fetchLimit) {
+                    break;
+                }
+            }
+        }
+
+        if (unique.isEmpty()) {
+            List<LivePlace> emergency = searchOverpass(
+                    reference,
+                    "ALL",
+                    Math.max(12.0, Math.min(safeDistanceKm * 1.5, 45.0)),
+                    Math.max(12, Math.min(fetchLimit, 36))
+            );
+            for (LivePlace place : emergency) {
+                unique.putIfAbsent(place.id, place);
                 if (unique.size() >= fetchLimit) {
                     break;
                 }
@@ -752,7 +984,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
                 .distinct()
-                .limit(14)
+                .limit(3)
                 .toList();
     }
 
@@ -814,6 +1046,143 @@ public class DiscoveryServiceImpl implements DiscoveryService {
         return List.of("night market", "late cafe", "night walk");
     }
 
+    private List<LivePlace> buildLocalFallbackPlaces(ReferencePoint reference, String category, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 48));
+        List<FallbackSeed> seeds = fallbackSeeds(category);
+        if (seeds.isEmpty()) {
+            return List.of();
+        }
+
+        List<LivePlace> result = new ArrayList<>();
+        for (int i = 0; i < safeLimit; i++) {
+            FallbackSeed seed = seeds.get(i % seeds.size());
+            result.add(buildLocalFallbackPlace(seed, i, reference));
+        }
+        return result;
+    }
+
+    private LivePlace buildLocalFallbackPlace(FallbackSeed seed, int index, ReferencePoint reference) {
+        int safeIndex = Math.max(0, index);
+        double lonScale = Math.max(0.2, Math.cos(Math.toRadians(reference.latitude)));
+        int variant = (safeIndex / 4) + 1;
+        String displayName = variant <= 1 ? seed.name : seed.name + " " + variant;
+        double ring = 0.0045 * (1 + (safeIndex % 6));
+        double angle = Math.toRadians((safeIndex * 37) % 360);
+        double latitude = reference.latitude + ring * Math.sin(angle);
+        double longitude = reference.longitude + (ring * Math.cos(angle) / lonScale);
+
+        Set<String> tags = new HashSet<>(seed.tags);
+        tags.add(seed.category.toLowerCase(Locale.ROOT));
+        tags.add("fallback");
+        tags.add("nearby");
+
+        String shortDescription = buildShortDescription(seed.category, tags, displayName);
+        String longDescription = displayName + " is a curated fallback suggestion while live provider data is unavailable.";
+        int reviewCount = Math.max(12, seed.popularity / 2);
+        double rating = roundOne(Math.max(3.8, Math.min(4.8, 3.6 + (seed.popularity / 100.0) * 1.2)));
+
+        return new LivePlace(
+                "local:" + seed.category.toLowerCase(Locale.ROOT) + ":" + safeIndex,
+                displayName,
+                seed.category,
+                tags,
+                shortDescription,
+                longDescription,
+                "Nearby area",
+                latitude,
+                longitude,
+                rating,
+                reviewCount,
+                seed.priceLevel,
+                seed.popularity,
+                null,
+                null,
+                List.of(),
+                "ATTRACTION".equals(seed.category) || "ACTIVITY".equals(seed.category),
+                "ACTIVITY".equals(seed.category) || "CUISINE".equals(seed.category),
+                true
+        );
+    }
+
+    private Optional<LivePlace> lookupLocalFallbackPlace(String placeId) {
+        if (placeId == null || placeId.isBlank()) {
+            return Optional.empty();
+        }
+
+        String[] parts = placeId.split(":");
+        if (parts.length != 3 || !"local".equals(parts[0])) {
+            return Optional.empty();
+        }
+
+        String category = parts[1].trim().toUpperCase(Locale.ROOT);
+        int index;
+        try {
+            index = Integer.parseInt(parts[2].trim());
+        } catch (NumberFormatException exception) {
+            return Optional.empty();
+        }
+
+        if (index < 0) {
+            return Optional.empty();
+        }
+
+        List<FallbackSeed> seeds = fallbackSeeds(category);
+        if (seeds.isEmpty()) {
+            return Optional.empty();
+        }
+
+        FallbackSeed seed = seeds.get(index % seeds.size());
+        ReferencePoint anchor = new ReferencePoint(DEFAULT_LAT, DEFAULT_LON);
+        return Optional.of(buildLocalFallbackPlace(seed, index, anchor));
+    }
+
+    private List<FallbackSeed> fallbackSeeds(String category) {
+        String safeCategory = category == null ? "ALL" : category.trim().toUpperCase(Locale.ROOT);
+        List<FallbackSeed> attractions = List.of(
+                new FallbackSeed("Hồ Gươm – Hoàn Kiếm Lake", "ATTRACTION", Set.of("culture", "landmark", "lake", "historic"), 92, 1),
+                new FallbackSeed("Văn Miếu Quốc Tử Giám", "ATTRACTION", Set.of("museum", "historic", "culture", "education"), 88, 1),
+                new FallbackSeed("Phố Cổ Hội An", "ATTRACTION", Set.of("historic", "culture", "walking", "photography"), 91, 1),
+                new FallbackSeed("Chùa Một Cột", "ATTRACTION", Set.of("temple", "historic", "landmark", "culture"), 85, 1),
+                new FallbackSeed("Lăng Chủ Tịch Hồ Chí Minh", "ATTRACTION", Set.of("historic", "landmark", "culture"), 89, 1),
+                new FallbackSeed("Đỉnh Fansipan – Sa Pa", "ATTRACTION", Set.of("nature", "mountain", "adventure", "viewpoint"), 87, 1),
+                new FallbackSeed("Vịnh Hạ Long", "ATTRACTION", Set.of("nature", "viewpoint", "cruise", "ocean"), 95, 1),
+                new FallbackSeed("Phố Bích Họa Phùng Hưng", "ATTRACTION", Set.of("art", "culture", "street_art", "photography"), 76, 1)
+        );
+        List<FallbackSeed> cuisines = List.of(
+                new FallbackSeed("Bún Chả Hương Liên", "CUISINE", Set.of("food", "bun_cha", "vietnamese", "local"), 90, 1),
+                new FallbackSeed("Phở Thìn Lò Đúc", "CUISINE", Set.of("food", "pho", "vietnamese", "breakfast"), 88, 1),
+                new FallbackSeed("Bánh Mì Phương Hội An", "CUISINE", Set.of("food", "banh_mi", "street_food", "sandwich"), 93, 1),
+                new FallbackSeed("Quán Bún Bò Huế Ngọc Bích", "CUISINE", Set.of("food", "bun_bo", "hue", "noodle"), 85, 1),
+                new FallbackSeed("Cà Phê Trứng Giảng", "CUISINE", Set.of("cafe", "coffee", "egg_coffee", "local"), 87, 2),
+                new FallbackSeed("Chợ Bến Thành Ẩm Thực", "CUISINE", Set.of("food", "market", "street_food", "seafood"), 82, 2),
+                new FallbackSeed("Lẩu Cá Kèo Ngon", "CUISINE", Set.of("food", "hotpot", "seafood", "southern"), 84, 2),
+                new FallbackSeed("Nem Nướng Ninh Hòa", "CUISINE", Set.of("food", "nem", "street_food", "grilled"), 80, 1)
+        );
+        List<FallbackSeed> activities = List.of(
+                new FallbackSeed("Tour Xe Đạp Phố Cổ", "ACTIVITY", Set.of("cycling", "tour", "outdoor", "culture"), 83, 1),
+                new FallbackSeed("Lớp Nấu Ăn Việt Nam", "ACTIVITY", Set.of("cooking", "cultural", "workshop", "local"), 86, 2),
+                new FallbackSeed("Đạp Thuyền Kayak Hạ Long", "ACTIVITY", Set.of("kayak", "ocean", "adventure", "nature"), 88, 2),
+                new FallbackSeed("Trải Nghiệm Làng Nghề Lụa Vạn Phúc", "ACTIVITY", Set.of("craft", "cultural", "silk", "local"), 79, 1),
+                new FallbackSeed("Bơi Lội Mỹ Nhân – Nha Trang", "ACTIVITY", Set.of("swimming", "beach", "outdoor", "sports"), 85, 1),
+                new FallbackSeed("Chèo SUP Sông Hàn", "ACTIVITY", Set.of("sup", "river", "sports", "outdoor"), 78, 2),
+                new FallbackSeed("Học Làm Đèn Lồng Hội An", "ACTIVITY", Set.of("lantern", "craft", "cultural", "workshop"), 82, 1),
+                new FallbackSeed("Trekking Rừng Pù Luông", "ACTIVITY", Set.of("trekking", "nature", "adventure", "forest"), 81, 1)
+        );
+
+        return switch (safeCategory) {
+            case "ATTRACTION" -> attractions;
+            case "CUISINE" -> cuisines;
+            case "ACTIVITY" -> activities;
+            default -> {
+                List<FallbackSeed> merged = new ArrayList<>();
+                merged.addAll(attractions);
+                merged.addAll(cuisines);
+                merged.addAll(activities);
+                yield merged;
+            }
+        };
+    }
+
     private List<LivePlace> searchNominatim(
             String term,
             ReferencePoint reference,
@@ -832,6 +1201,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                     + "&namedetails=1"
                     + "&limit=" + limit
                     + "&accept-language=" + encode("vi,en")
+                    + "&email=" + encode(NOMINATIM_CONTACT_EMAIL)
                     + "&q=" + encode(term));
 
             if (bounded) {
@@ -874,6 +1244,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
             return List.of();
         }
 
+        Map<String, LivePlace> localPlaces = new LinkedHashMap<>();
+        for (String placeId : placeIds) {
+            lookupLocalFallbackPlace(placeId).ifPresent(place -> localPlaces.putIfAbsent(place.id, place));
+        }
+
         List<String> osmTokens = placeIds.stream()
                 .map(this::toOsmLookupToken)
                 .flatMap(Optional::stream)
@@ -881,7 +1256,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                 .toList();
 
         if (osmTokens.isEmpty()) {
-            return List.of();
+            return new ArrayList<>(localPlaces.values());
         }
 
         List<LivePlace> result = new ArrayList<>();
@@ -893,6 +1268,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                     + "&addressdetails=1"
                     + "&extratags=1"
                     + "&namedetails=1"
+                    + "&email=" + encode(NOMINATIM_CONTACT_EMAIL)
                     + "&osm_ids=" + encode(joined);
             try {
                 JsonNode array = readJsonArray(url);
@@ -908,6 +1284,9 @@ public class DiscoveryServiceImpl implements DiscoveryService {
         }
 
         Map<String, LivePlace> dedup = new LinkedHashMap<>();
+        for (LivePlace place : localPlaces.values()) {
+            dedup.putIfAbsent(place.id, place);
+        }
         for (LivePlace place : result) {
             dedup.putIfAbsent(place.id, place);
         }
@@ -922,10 +1301,10 @@ public class DiscoveryServiceImpl implements DiscoveryService {
 
             HttpRequest request = HttpRequest.newBuilder(URI.create(OVERPASS_BASE_URL))
                     .POST(HttpRequest.BodyPublishers.ofString(overpassQuery, StandardCharsets.UTF_8))
-                    .timeout(Duration.ofSeconds(18))
+                    .timeout(Duration.ofMillis(2800))
                     .header("Accept", "application/json")
                     .header("Content-Type", "text/plain; charset=utf-8")
-                    .header("User-Agent", "ExploreEase/1.0 (contact: explore-ease@example.com)")
+                    .header("User-Agent", DISCOVERY_USER_AGENT)
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -1119,9 +1498,9 @@ public class DiscoveryServiceImpl implements DiscoveryService {
     private JsonNode readJsonArray(String url) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .GET()
-                .timeout(Duration.ofSeconds(12))
+                .timeout(Duration.ofMillis(1200))
                 .header("Accept", "application/json")
-                .header("User-Agent", "ExploreEase/1.0 (contact: explore-ease@example.com)")
+                .header("User-Agent", DISCOVERY_USER_AGENT)
                 .build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -1741,7 +2120,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                     .GET()
                     .timeout(Duration.ofSeconds(10))
                     .header("Accept", "application/json")
-                    .header("User-Agent", "ExploreEase/1.0 (contact: explore-ease@example.com)")
+                    .header("User-Agent", DISCOVERY_USER_AGENT)
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -1987,6 +2366,22 @@ public class DiscoveryServiceImpl implements DiscoveryService {
         private ProfileContext(Set<InterestType> interests, String travelStyle) {
             this.interests = interests;
             this.travelStyle = travelStyle;
+        }
+    }
+
+    private static final class FallbackSeed {
+        private final String name;
+        private final String category;
+        private final Set<String> tags;
+        private final int popularity;
+        private final int priceLevel;
+
+        private FallbackSeed(String name, String category, Set<String> tags, int popularity, int priceLevel) {
+            this.name = name;
+            this.category = category;
+            this.tags = tags;
+            this.popularity = popularity;
+            this.priceLevel = priceLevel;
         }
     }
 
